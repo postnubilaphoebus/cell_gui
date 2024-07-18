@@ -26,10 +26,15 @@ from matplotlib.figure import Figure
 import skimage
 import math
 from skimage.exposure import equalize_hist
+from collections import defaultdict
+import matplotlib
+import matplotlib.colors as mcolors
+from PIL import ImageColor
+
 
 # created with https://github.com/lmcinnes/glasbey
 # this package is sometimes stubborn to install, which is why it is hardcoded
-glasbey_cmap = ['#d21820', '#1869ff', '#008a00', '#f36dff', '#710079', '#aafb00', '#00bec2', 
+glasbey_cmap_100 = ['#d21820', '#1869ff', '#008a00', '#f36dff', '#710079', '#aafb00', '#00bec2', 
                 '#ffa235', '#5d3d04', '#08008a', '#005d5d', '#9a7d82', '#a2aeff', '#96b675', 
                 '#9e28ff', '#4d0014', '#ffaebe', '#ce0092', '#00ffb6', '#002d00', '#9e7500', 
                 '#3d3541', '#f3eb92', '#65618a', '#8a3d4d', '#5904ba', '#558a71', '#b2bec2', 
@@ -45,9 +50,37 @@ glasbey_cmap = ['#d21820', '#1869ff', '#008a00', '#f36dff', '#710079', '#aafb00'
                 '#558edb', '#caca9a', '#351820', '#393d00', '#009a96', '#eb106d', '#8a4579', 
                 '#75aac2', '#ca929a']
 
-#tab10_colormap = matplotlib.colormaps['tab10']
-#glasbey_cmap = [mcolors.to_hex(color) for color in tab10_colormap.colors]
-#del glasbey_cmap[7] # get rid of the grey one
+glasbey_cmap_20 = ['#d21820',
+                '#1869ff',
+                '#008a00',
+                '#f36dff',
+                '#710079',
+                '#aafb00',
+                '#00bec2',
+                '#ffa235',
+                '#5d3d04',
+                '#08008a',
+                '#005d5d',
+                '#9a7d82',
+                '#a2aeff',
+                '#96b675',
+                '#9e28ff',
+                '#4d0014',
+                '#ffaebe',
+                '#ce0092',
+                '#00ffb6',
+                '#002d00']
+
+
+
+#glasbey_cmap = glasbey_cmap[:10]
+
+# tab10_colormap = matplotlib.colormaps['tab10']
+# glasbey_cmap = [mcolors.to_hex(color) for color in tab10_colormap.colors]
+# del glasbey_cmap[7] # get rid of the grey one
+glasbey_cmap = glasbey_cmap_100
+glasbey_cmap_rgb = [ImageColor.getcolor(col, "RGB") for col in glasbey_cmap]
+num_colors = len(glasbey_cmap)
 
 # icon from https://icons8.com/icon/52955/paint
 
@@ -151,12 +184,23 @@ class GraphicsView(QGraphicsView):
             step_size = self.main_window.sliderx.singleStep()
             self.main_window.sliderx.setValue(current_value + step_size)
         elif event.key() == Qt.Key_M:
+            if self.main_window.visualization_only:
+                if self.main_window.markers_enabled:
+                    if self.main_window.backup_greyscale is not None:
+                        self.main_window.backup_color = self.main_window.image_data
+                        self.main_window.image_data = self.main_window.backup_greyscale
+                else:
+                    if self.main_window.backup_color is not None:
+                        self.main_window.backup_greyscale = self.main_window.image_data
+                        self.main_window.image_data = self.main_window.backup_color
             self.main_window.markers_enabled = not self.main_window.markers_enabled
             self.main_window.update_image()
             self.main_window.update_xz_view()
             self.main_window.update_yz_view()
         elif event.key() == Qt.Key_E:
             self.main_window.toggleEraser()
+        elif event.key() == Qt.Key_J:
+            self.main_window.visualization_mode()
         elif event.key() == Qt.Key_F:
             self.main_window.toggleForeground()
         elif event.key() == Qt.Key_B:
@@ -223,7 +267,7 @@ class GraphicsView(QGraphicsView):
                     and k <= self.main_window.z_max \
                     and k >= self.main_window.z_min:
                         if self.main_window.foreground_enabled:
-                            points.append((x, j, k,  self.main_window.index_control.cell_index))
+                            points.append((x, j, k,  self.main_window.index_control.cell_index, self.main_window.index_control.cell_index%num_colors))
                         else:
                             points.append((x, j, k))
         elif fixed_dimension == 'Y':
@@ -235,7 +279,7 @@ class GraphicsView(QGraphicsView):
                     and k <= self.main_window.z_max \
                     and k >= self.main_window.z_min:
                         if self.main_window.foreground_enabled:
-                            points.append((i, y, k,  self.main_window.index_control.cell_index))
+                            points.append((i, y, k,  self.main_window.index_control.cell_index, self.main_window.index_control.cell_index%num_colors))
                         else:
                             points.append((i, y, k))
         elif fixed_dimension == 'Z':
@@ -247,7 +291,7 @@ class GraphicsView(QGraphicsView):
                     and j <= self.main_window.y_max \
                     and j >= self.main_window.y_min:
                         if self.main_window.foreground_enabled:
-                            points.append((i, j, z, self.main_window.index_control.cell_index))
+                            points.append((i, j, z, self.main_window.index_control.cell_index, self.main_window.index_control.cell_index%num_colors))
                         else:
                             points.append((i, j, z))
         return points
@@ -290,7 +334,7 @@ class GraphicsView(QGraphicsView):
                         points = self.obtain_current_points(pixmap_item, event, self.view_plane)
                         if self.main_window.foreground_enabled:
                             if self.main_window.brush_width == 1:
-                                points = points + (self.main_window.index_control.cell_index,)
+                                points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
                                 if points not in self.main_window.foreground_points:
                                     self.main_window.foreground_points.append(points)
                             elif self.main_window.brush_width > 1:
@@ -362,7 +406,7 @@ class GraphicsView(QGraphicsView):
                 points = self.obtain_current_points(pixmap_item, event, self.view_plane)
                 if self.main_window.foreground_enabled:
                     if self.main_window.brush_width == 1:
-                        points = points + (self.main_window.index_control.cell_index,)
+                        points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
                         if points not in self.main_window.foreground_points:
                             self.main_window.foreground_points.append(points)
                     elif self.main_window.brush_width > 1:
@@ -404,8 +448,9 @@ class MainWindow(QMainWindow):
         else:
             self.image_data = skimage.io.imread(filename)
         if np.max(self.image_data.ravel()) <= 1:
-            QMessageBox.about(self, "Warning: Maximum brightness at or below 1", 
-            "Defaulting to *255 for PyQT compatibility")
+            temp_min = np.min(self.image_data.ravel())
+            temp_max = np.max(self.image_data.ravel())
+            self.image_data = (self.image_data - temp_min) / (temp_max - temp_min)
             self.image_data = self.image_data * 255.0
         self.z_max = self.image_data.shape[0] - 1
         self.y_max = self.image_data.shape[1] - 1
@@ -487,6 +532,15 @@ class MainWindow(QMainWindow):
         self.foreground_button = QPushButton('Foreground (F)', self)
         self.foreground_button.clicked.connect(self.toggleForeground)
         layout_buttons.addWidget(self.foreground_button)
+
+        self.visualization_mode_button = QPushButton('Visualization Mode (J)', self)
+        self.visualization_mode_button.clicked.connect(self.visualization_mode)
+        layout_buttons.addWidget(self.visualization_mode_button)
+        self.visualization_only = False
+        self.backup_greyscale = None
+        self.backup_color = None
+
+        self.reset_transformations_button = QPushButton('Visualization Mode (J)', self)
 
         self.background_button = QPushButton('Background (B)', self)
         self.background_button.clicked.connect(self.toggleBackground)
@@ -598,12 +652,49 @@ class MainWindow(QMainWindow):
         
     def numpyArrayToPixmap(self, img_np):
         img_np = np.require(img_np, np.uint8, 'C')
-        qim = QImage(img_np.data, img_np.shape[1], 
-                     img_np.shape[0], img_np.strides[0], 
-                     QImage.Format_Indexed8)
+        # Check if the image has 3 channels (RGB)
+        if img_np.ndim == 3 and img_np.shape[2] == 3:
+            qim = QImage(img_np.data, img_np.shape[1], img_np.shape[0], img_np.strides[0], QImage.Format_RGB888)
+        else:
+            qim = QImage(img_np.data, img_np.shape[1], 
+                         img_np.shape[0], img_np.strides[0], 
+                         QImage.Format_Indexed8)
         pixmap = QPixmap.fromImage(qim)
         return pixmap
     
+    def visualization_mode(self):
+        if not self.visualization_only:
+            self.visualization_mode_button.setStyleSheet("background-color: lightgreen")
+            self.repaint()
+            img = self.image_data
+            rgb_img = np.stack([img] * 3, axis=-1) 
+            # sort according to color index
+            points = sorted(self.foreground_points, key=lambda x: x[-1]) 
+            self.visualization_only = True
+            self.backup_greyscale = img
+            batches = defaultdict(list)
+            for point in points:
+                batches[point[-1]].append(point[:3])
+            for key in batches:
+                points_list = batches[key]
+                color_tuple = glasbey_cmap_rgb[key]
+                for point in points_list:
+                    x, y, z = point
+                    rgb_img[z, y, x] = color_tuple
+            self.image_data = rgb_img
+            self.update_image()
+            self.update_xz_view()
+            self.update_yz_view()
+        else:
+            self.visualization_only = False
+            self.visualization_mode_button.setStyleSheet("")
+            self.repaint()
+            self.backup_color = self.image_data
+            self.image_data = self.backup_greyscale
+            self.update_image()
+            self.update_xz_view()
+            self.update_yz_view()
+
     def hide_show_view_finder(self):
         if self.view_finder:
             self.view_finder_button.setText("View Finder Off (V)")
@@ -633,7 +724,6 @@ class MainWindow(QMainWindow):
     def plot_hist(self):
         ax = self.hist_figure.add_subplot(111)
         ax.hist(self.image_data.ravel(), bins=int(self.max_pixel_intensity), range=(self.min_pixel_intensity, self.max_pixel_intensity))
-        #ax.ticklabel_format(style='plain')
         ax.set_title('Histogram of Pixel Intensities')
         ax.set_ylabel("Bin pixel count")
         ax.set_xlabel("Pixel intensity")
@@ -800,12 +890,10 @@ class MainWindow(QMainWindow):
             np.save(mask_name, mask)
             QMessageBox.about(self, "Masks saved", "Masks saved as %s" % (mask_name))
         
-    def load_masks(self, filename):
-        assert filename.endswith("tif_mask.npy"), "Mask file must end with tif_mask.npy"
+    def load_masks(self, filename, load_background = False):
+        assert filename.endswith(".npy"), "Mask file must end with .npy"
         mask = np.load(filename)
         assert mask.shape == self.image_data.shape, "Mask shape does not match image shape"
-        filename = filename.split(os.sep)[-1]
-        assert filename[:-12] in self.filename, "Partial mismatch between mask filename and image filename"
         z_shape, y_shape, x_shape = mask.shape
         self.background_points = []
         self.foreground_points = []
@@ -813,11 +901,14 @@ class MainWindow(QMainWindow):
             for y in range(y_shape):
                 for x in range(x_shape):
                     if mask[z, y, x] == 0:
-                        self.background_points.append((x, y, z))
+                        if load_background:
+                            self.background_points.append((x, y, z))
                     elif mask[z, y, x] > 0:
-                        self.foreground_points.append((x, y, z, mask[z, y, x]))
+                        self.foreground_points.append((x, y, z, mask[z, y, x], mask[z, y, x]%num_colors))
                         if mask[z, y, x] > self.index_control.cell_index:
                             self.index_control.cell_index = mask[z, y, x]
+        # sort according to color index
+        self.foreground_points = sorted(self.foreground_points, key=lambda x: x[-1])
         self.current_highest_cell_index = self.index_control.cell_index
         self.cell_idx_display.update_text(self.index_control.cell_index, self.current_highest_cell_index)
         self.index_control.update_index(self.index_control.cell_index, self.current_highest_cell_index)
@@ -830,6 +921,17 @@ class MainWindow(QMainWindow):
         options = QFileDialog.Options()
         file_name, _ = QFileDialog.getOpenFileName(self, "Load Mask", "", "Numpy Files (*.npy)", options=options)
         if file_name:
+            mbox = QMessageBox.question(self, 'Background pixels', "Do you want to color the background (0s) also? (Not recommended)", 
+                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if mbox == QMessageBox.Yes:
+                mbox = QMessageBox.question(self, 'Load Background pixels', "Are you sure?", 
+                                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if mbox == QMessageBox.Yes:
+                    self.load_masks(file_name, True)
+                else:
+                    self.load_masks(file_name, False)
+            else:
+                self.load_masks(file_name, False)
             self.load_masks(file_name)
 
     def localContrastEnhancer(self):
@@ -848,7 +950,7 @@ class MainWindow(QMainWindow):
         self.update_image()
 
     def toggle_submit_contrast(self):
-        if self.first_mouse_pos_for_contrast_rect and self.last_mouse_pos_for_contrast_rect:
+        if (self.first_mouse_pos_for_contrast_rect and self.last_mouse_pos_for_contrast_rect) and not self.visualization_only:
             x_min = min(self.first_mouse_pos_for_contrast_rect.x(), self.last_mouse_pos_for_contrast_rect.x())
             x_max = max(self.first_mouse_pos_for_contrast_rect.x(), self.last_mouse_pos_for_contrast_rect.x())
             y_min = min(self.first_mouse_pos_for_contrast_rect.y(), self.last_mouse_pos_for_contrast_rect.y())
@@ -874,66 +976,75 @@ class MainWindow(QMainWindow):
     def findCell(self):
         pts = self.foreground_points
         if pts:
-            last_cell_index = pts[-1][-1]
-            matching_points = [point[:-1] for point in pts if point[-1] == last_cell_index]
-            if len(matching_points) > 2:
-                average_point = np.mean(matching_points, axis=0)
-                self.slidery.setValue(round(average_point[1]))
-                self.sliderx.setValue(round(average_point[0]))
-                self.slider.setValue(round(average_point[2]))
-            else:
-                self.slidery.setValue(pts[-1][1])
-                self.sliderx.setValue(pts[-1][0])
-                self.slider.setValue(pts[-1][2])
+            if not self.visualization_only:
+                last_cell_index = pts[-1][3]
+                matching_points = [point[:4] for point in pts if point[3] == last_cell_index]
+                if len(matching_points) > 2:
+                    average_point = np.median(matching_points, axis=0)
+                    self.slidery.setValue(round(average_point[1]))
+                    self.sliderx.setValue(round(average_point[0]))
+                    self.slider.setValue(round(average_point[2]))
+                else:
+                    self.slidery.setValue(pts[-1][1])
+                    self.sliderx.setValue(pts[-1][0])
+                    self.slider.setValue(pts[-1][2])
         else:
             QMessageBox.about(self, "Foreground empty", "%s" % ("Please draw cells using the foreground button"))
 
     def markersOffOn(self):
+        
         if self.markers_enabled:
             self.markers_enabled = False
-            self.markers_off_on_button.setText("Markers Off")
+            self.markers_off_on_button.setText("Markers Off (M)")
             self.foreground_enabled = False
             self.background_enabled = False
             self.eraser_enabled = False 
+            if self.visualization_only and self.backup_greyscale is not None:
+                self.backup_color = self.image_data
+                self.image_data = self.backup_greyscale
             self.update_image()
             self.update_xz_view()
             self.update_yz_view()
         else:
             self.markers_enabled = True
-            self.markers_off_on_button.setText("Markers On")
+            self.markers_off_on_button.setText("Markers On (M)")
+            if self.visualization_only and self.backup_color is not None:
+                self.backup_greyscale = self.image_data
+                self.image_data = self.backup_color
             self.update_image()
             self.update_xz_view()
             self.update_yz_view()
         self.repaint()
+
             
     def update_image(self):
         z_index = self.slider.value()
         image = self.image_data[z_index]
         pixmap = self.numpyArrayToPixmap(image)
-        if self.markers_enabled:
+        if self.markers_enabled and not self.visualization_only:
+
             painter = QPainter(pixmap)
             if self.foreground_points:
-                self.foreground_points = sorted(self.foreground_points, key=lambda x: x[-1])
                 color_idx = self.foreground_points[0][-1]
                 color_count = 0
-                pen = QPen(QColor(glasbey_cmap[color_count]))
+                pen = QPen(QColor(glasbey_cmap[color_idx]))
                 pen.setWidth(1)
                 painter.setPen(pen)
-                for point in self.foreground_points:
+                relevant_points = [point for point in self.foreground_points if point[2] == z_index]
+                for point in relevant_points:
                     if point[-1] != color_idx:
                         color_idx = point[-1]
                         color_count += 1
-                        pen = QPen(QColor(glasbey_cmap[color_count%len(glasbey_cmap)]))
+                        pen = QPen(QColor(glasbey_cmap[color_idx]))
                         pen.setWidth(1)
                         painter.setPen(pen)
-                    if point[2] == z_index:
-                        painter.drawPoint(point[0], point[1])
+                    painter.drawPoint(point[0], point[1])
 
             pen = QPen(Qt.blue)
             pen.setWidth(1)
             painter.setPen(pen)
 
-            if self.background_points:
+            if self.background_points and not self.visualization_only:
                 for point in self.background_points:
                     if point[2] == z_index:
                         painter.drawPoint(point[0], point[1])
@@ -954,7 +1065,8 @@ class MainWindow(QMainWindow):
 
         if self.local_contrast_enhancer_enabled and \
             self.first_mouse_pos_for_contrast_rect and \
-                self.last_mouse_pos_for_contrast_rect:
+                self.last_mouse_pos_for_contrast_rect and \
+                    not self.visualization_only:
             painter = QPainter(pixmap)
             pen = QPen(Qt.red)
             pen.setWidth(1)
@@ -967,35 +1079,39 @@ class MainWindow(QMainWindow):
     def slider_to_pixmap(self, slider_value, slider_min, slider_max, pixmap_min, pixmap_max):
         return int((slider_value - slider_min) / (slider_max - slider_min) * (pixmap_max - pixmap_min) + pixmap_min)
 
-    def update_xz_view(self):
+    def update_xz_view(self):   
         y_index = self.slidery.value()
-        image = self.image_data[:, y_index, :].T
+        if self.image_data.ndim == 4:
+            image = self.image_data[:, y_index, :, :]
+            image = np.transpose(image, (1, 0, 2))
+        else:
+            image = self.image_data[:, y_index, :].T
         pixmap = self.numpyArrayToPixmap(image)
 
-        if self.markers_enabled:
+        if self.markers_enabled and not self.visualization_only:
             painter = QPainter(pixmap)
             if self.foreground_points:
-                self.foreground_points = sorted(self.foreground_points, key=lambda x: x[-1])
                 color_idx = self.foreground_points[0][-1]
                 color_count = 0
-                pen = QPen(QColor(glasbey_cmap[color_count]))
+                pen = QPen(QColor(glasbey_cmap[color_idx]))
                 pen.setWidth(1)
                 painter.setPen(pen)
-                for point in self.foreground_points:
+                relevant_points = [point for point in self.foreground_points if point[1] == y_index]
+
+                for point in relevant_points:
                     if point[-1] != color_idx:
                         color_idx = point[-1]
                         color_count += 1
-                        pen = QPen(QColor(glasbey_cmap[color_count%len(glasbey_cmap)]))
+                        pen = QPen(QColor(glasbey_cmap[color_idx]))
                         pen.setWidth(1)
                         painter.setPen(pen)
-                    if point[1] == y_index:
-                        painter.drawPoint(point[2], point[0])
+                    painter.drawPoint(point[2], point[0])
 
             pen = QPen(Qt.blue)
             pen.setWidth(1)
             painter.setPen(pen)
 
-            if self.background_points:
+            if self.background_points and not self.visualization_only:
                 for point in self.background_points:
                     if point[1] == y_index:
                         painter.drawPoint(point[2], point[0])
@@ -1013,32 +1129,36 @@ class MainWindow(QMainWindow):
 
     def update_yz_view(self):
         x_index = self.sliderx.value()
-        image = self.image_data[:, :, x_index].T
+        if self.image_data.ndim == 4:
+            image = self.image_data[:, :, x_index, :]
+            image = np.transpose(image, (1, 0, 2))
+        else:
+            image = self.image_data[:, :, x_index].T
         pixmap = self.numpyArrayToPixmap(image)
-        if self.markers_enabled:
+        if self.markers_enabled and not self.visualization_only:
             painter = QPainter(pixmap)
             if self.foreground_points:
-                self.foreground_points = sorted(self.foreground_points, key=lambda x: x[-1])
                 color_idx = self.foreground_points[0][-1]
                 color_count = 0
-                pen = QPen(QColor(glasbey_cmap[color_count]))
+                pen = QPen(QColor(glasbey_cmap[color_idx]))
                 pen.setWidth(1)
                 painter.setPen(pen)
-                for point in self.foreground_points:
+                relevant_points = [point for point in self.foreground_points if point[0] == x_index]
+                
+                for point in relevant_points:
                     if point[-1] != color_idx:
                         color_idx = point[-1]
                         color_count += 1
-                        pen = QPen(QColor(glasbey_cmap[color_count%len(glasbey_cmap)]))
+                        pen = QPen(QColor(glasbey_cmap[color_idx]))
                         pen.setWidth(1)
                         painter.setPen(pen)
-                    if point[0] == x_index:
-                        painter.drawPoint(point[2], point[1])
+                    painter.drawPoint(point[2], point[1])
 
             pen = QPen(Qt.blue)
             pen.setWidth(1)
             painter.setPen(pen)
 
-            if self.background_points:
+            if self.background_points and not self.visualization_only:
                 for point in self.background_points:
                     if point[0] == x_index:
                         painter.drawPoint(point[2], point[1])
