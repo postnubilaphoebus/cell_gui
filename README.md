@@ -13,3 +13,6 @@ For example: python gui.py "img2.tif". Once in the GUI, you can open previously 
 *Local Contrast Enhancement*: In case of a particularly dark/unclear region, you may apply local contrast enhancement. Draw a rectangle on the image after pressing the LCE button, and then press submit. A cuboid in the image volume is now locally enhanced using CLAHE.  <br> <br>
 All the other functions should be self-explanatory.
 
+### Large files <br>
+https://drive.google.com/drive/folders/1bYrDK2XYFTzhOSVTva56fzmTeqgsBtm_?usp=sharing
+
