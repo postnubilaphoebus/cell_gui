@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QFormLayout, QSpinBox,
 import numpy as np
 from tqdm import tqdm
 from cmaps import  num_colors
-from scipy.spatial import KDTree
+from scipy.ndimage import find_objects
 
 class LoadingScreen(QWidget):
     def __init__(self, parent=None):
@@ -179,33 +179,71 @@ class MaskLoader(QThread):
 
     def run(self):
         assert self.filename.endswith(".npy"), "Mask file must end with .npy"
-        mask = np.load(self.filename, allow_pickle='TRUE').item()
-        self.parent.background_points = []
-        self.parent.foreground_points = []
-        self.parent.z_view_dict = {}
-        self.parent.y_view_dict = {}
-        self.parent.x_view_dict = {}
-        for i in tqdm(range(1, len(mask)+1)):
-            global_locs = mask.get(i)
-            if global_locs is not None:
-                color_idx = i % num_colors
-                for loc in global_locs:
-                    z, y, x = loc
-                    self.parent.pure_coordinates.append((x, y, z))
-                    self.parent.foreground_points.append((x, y, z, i, color_idx))
-                    if z not in self.parent.z_view_dict:
-                        self.parent.z_view_dict[z] = []
-                    self.parent.z_view_dict[z].append((x, y, i, color_idx))
-                    if y not in self.parent.y_view_dict:
-                        self.parent.y_view_dict[y] = []
-                    self.parent.y_view_dict[y].append((z, x, i, color_idx))
-                    if x not in self.parent.x_view_dict:
-                        self.parent.x_view_dict[x] = []
-                    self.parent.x_view_dict[x].append((z, y, i, color_idx))
-                    if self.load_background:
-                        self.parent.background_points.append((x, y, z, i, color_idx))
+        try:
+            # mask saved as dict
+            mask = np.load(self.filename, allow_pickle='TRUE').item()
+            self.parent.background_points = []
+            self.parent.foreground_points = []
+            self.parent.z_view_dict = {}
+            self.parent.y_view_dict = {}
+            self.parent.x_view_dict = {}
+            print("loading masks...")
+            for i in tqdm(range(1, len(mask)+1)):
+                global_locs = mask.get(i)
+                if global_locs is not None:
+                    color_idx = i % num_colors
+                    for loc in global_locs:
+                        z, y, x = loc
+                        self.parent.pure_coordinates.append((x, y, z))
+                        self.parent.foreground_points.append((x, y, z, i, color_idx))
+                        if z not in self.parent.z_view_dict:
+                            self.parent.z_view_dict[z] = []
+                        self.parent.z_view_dict[z].append((x, y, i, color_idx))
+                        if y not in self.parent.y_view_dict:
+                            self.parent.y_view_dict[y] = []
+                        self.parent.y_view_dict[y].append((z, x, i, color_idx))
+                        if x not in self.parent.x_view_dict:
+                            self.parent.x_view_dict[x] = []
+                        self.parent.x_view_dict[x].append((z, y, i, color_idx))
+                        if self.load_background:
+                            self.parent.background_points.append((x, y, z, i, color_idx))
                     if i > self.parent.index_control.cell_index:
                         self.parent.index_control.cell_index = i
+                self.progress.emit(i)
+        except:
+            # mask saved as npy array
+            mask = np.load(self.filename)
+            assert mask.shape == self.parent.image_data.shape, "Mask shape does not match image shape"
+            self.parent.background_points = []
+            self.parent.foreground_points = []
+            self.parent.z_view_dict = {}
+            self.parent.y_view_dict = {}
+            self.parent.x_view_dict = {}
+            print("loading masks...")
+            slices = find_objects(mask)
+            for i, slice_tuple in enumerate(tqdm(slices), start=1):
+                if slice_tuple is not None:
+                    local_locs = np.array(np.where(mask[slice_tuple] == i))
+                    global_locs = np.stack(local_locs).T + np.array([s.start for s in slice_tuple])
+                    color_idx = i % num_colors
+                    for loc in global_locs:
+                        z, y, x = loc
+                        self.parent.pure_coordinates.append((x, y, z))
+                        self.parent.foreground_points.append((x, y, z, i, color_idx))
+                        if z not in self.parent.z_view_dict:
+                            self.parent.z_view_dict[z] = []
+                        self.parent.z_view_dict[z].append((x, y, i, color_idx))
+                        if y not in self.parent.y_view_dict:
+                            self.parent.y_view_dict[y] = []
+                        self.parent.y_view_dict[y].append((z, x, i, color_idx))
+                        if x not in self.parent.x_view_dict:
+                            self.parent.x_view_dict[x] = []
+                        self.parent.x_view_dict[x].append((z, y, i, color_idx))
+                        if self.load_background:
+                            self.parent.background_points.append((x, y, z, i, color_idx))
+                    if i > self.parent.index_control.cell_index:
+                        self.parent.index_control.cell_index = i
+                self.progress.emit(i)
 
         self.parent.foreground_points = sorted(self.parent.foreground_points, key=lambda x: x[-1])
         if self.parent.data_per_tab[self.parent.current_tab_index].get("foreground_points") is not None:
