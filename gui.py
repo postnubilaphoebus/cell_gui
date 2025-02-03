@@ -18,7 +18,8 @@ from PyQt5.QtWidgets import (QApplication,
                              QComboBox,
                              QAction,
                              QTabWidget,
-                             QMenu)
+                             QMenu,
+                             QSizePolicy)
 from PyQt5.QtCore import Qt, QSize, QRect, pyqtSlot, QPointF, QRectF
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QCursor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -68,6 +69,7 @@ class MainWindow(QMainWindow):
         self.xz_view = None
         self.yz_view = None
         self.current_zoom_location = None#scene_pos - delta
+        self.current_zoom_factor = 1
 
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
@@ -139,6 +141,14 @@ class MainWindow(QMainWindow):
         self.sliderx.setValue(self.x_max//2)
         layout_buttons.addWidget(self.sliderx_label)
         layout_buttons.addWidget(self.sliderx)
+
+        self.tab_switch_prev = QPushButton("Go to previous tab (P)", self)
+        self.tab_switch_prev.clicked.connect(self.switch_to_previous_tab)
+        layout_buttons.addWidget(self.tab_switch_prev)
+
+        self.tab_switch_next = QPushButton("Go to next tab (N)", self)
+        self.tab_switch_next.clicked.connect(self.switch_to_next_tab)
+        layout_buttons.addWidget(self.tab_switch_next)
 
         # self.tab_switch_button = QPushButton("Switch Tab (T)", self)
         # self.tab_switch_button.clicked.connect()
@@ -303,6 +313,12 @@ class MainWindow(QMainWindow):
         self.last_mouse_pos_for_contrast_rect = None
         self.first_mouse_pos_for_watershed_cube = None
         self.last_mouse_pos_for_watershed_cube = None
+        self.xy_transform = None
+        self.xz_transform = None
+        self.yz_transform = None
+        self.xy_mouse_position = None
+        self.xz_mouse_position = None
+        self.yz_mouse_position = None
         # self.yz_view.rotate_view(-90)
         # self.xz_view.rotate_view(-90)
         self.foreground_points = []
@@ -317,8 +333,29 @@ class MainWindow(QMainWindow):
         self.update_yz_view()
         self.update_xy_view()
 
-    def tab_switch_button_action(self):
-        pass
+    def switch_to_previous_tab(self):
+        current_index = self.tab_widget.currentIndex()
+        num_tabs = self.tab_widget.count()
+        previous_index = (current_index - 1) % num_tabs
+        if self.data_per_tab.get(previous_index) is not None:
+            self.current_tab_index = previous_index
+            self.tab_widget.setCurrentIndex(previous_index)
+            self.update_tab_view(previous_index)
+            self.update_xy_view()
+            self.update_xz_view()
+            self.update_yz_view()
+
+    def switch_to_next_tab(self):
+        current_index = self.tab_widget.currentIndex()
+        num_tabs = self.tab_widget.count()
+        next_index = (current_index + 1) % num_tabs
+        if self.data_per_tab.get(next_index) is not None:
+            self.current_tab_index = next_index
+            self.tab_widget.setCurrentIndex(next_index)
+            self.update_tab_view(next_index)
+            self.update_xy_view()
+            self.update_xz_view()
+            self.update_yz_view()
 
     def create_image_view_layout(self, image_name="Image", image_data=None):
         if self.initial_view == 0:
@@ -334,9 +371,9 @@ class MainWindow(QMainWindow):
             yz_view = GraphicsView(self, "YZ")
 
             # Add the views to the layout
-            layout.addWidget(xy_view)
-            layout.addWidget(xz_view)
-            layout.addWidget(yz_view)
+            layout.addWidget(xy_view, stretch=1)
+            layout.addWidget(xz_view, stretch=1)
+            layout.addWidget(yz_view, stretch=1)
 
             # Add the widget to the tab widget
             self.tab_widget.addTab(image_view_widget, image_name)
@@ -384,9 +421,10 @@ class MainWindow(QMainWindow):
             self.pure_coordinates = []
             self.copied_points = []
 
-            layout.addWidget(xy_view)
-            layout.addWidget(xz_view)
-            layout.addWidget(yz_view)
+
+            layout.addWidget(xy_view, stretch=1)
+            layout.addWidget(xz_view, stretch=1)
+            layout.addWidget(yz_view, stretch=1)
 
             self.tab_widget.insertTab(0, image_view_widget, image_name)
             if 0 not in self.data_per_tab:
@@ -463,9 +501,9 @@ class MainWindow(QMainWindow):
             self.pure_coordinates = []
             self.copied_points = []
 
-            layout.addWidget(xy_view)
-            layout.addWidget(xz_view)
-            layout.addWidget(yz_view)
+            layout.addWidget(xy_view, stretch=1)
+            layout.addWidget(xz_view, stretch=1)
+            layout.addWidget(yz_view, stretch=1)
 
             self.tab_widget.addTab(image_view_widget, image_name)
             new_tab_index = self.tab_widget.count() - 1
@@ -502,6 +540,13 @@ class MainWindow(QMainWindow):
     def on_tab_changed(self, index):
         self.current_tab_index = index
         if index > -1 and self.data_per_tab.get(index)is not None:
+            # zoom_location = self.current_zoom_location
+            # zoom_factor = self.current_zoom_factor
+
+            # # Apply these to the new tab's views
+            # for view in [self.xy_view, self.xz_view, self.yz_view]:
+            #     view.centerOn(zoom_location)
+            #     view.scale(zoom_factor, zoom_factor)
 
             self.update_tab_view(index)
             self.update_xy_view()
@@ -515,6 +560,12 @@ class MainWindow(QMainWindow):
     def close_tab(self, index):
         if index > -1:
             self.tab_widget.removeTab(index)
+            # vals = self.data_per_tab.get(index)
+            # if vals:
+            #     self.data_per_tab.pop(index)
+            #     shifted_dict = {i: v for i, v in enumerate(self.data_per_tab.values())}
+            #     self.data_per_tab = shifted_dict
+            #     self.initial_view -= 1
 
     def update_tab_view(self, index):
         self.image_min = self.data_per_tab[index].get("image_min")
@@ -543,7 +594,21 @@ class MainWindow(QMainWindow):
         self.x_view_dict = self.data_per_tab[index].get("x_view_dict")
         self.pure_coordinates = self.data_per_tab[index].get("pure_coordinates")
         self.copied_points = []
-
+        if self.xy_transform is not None:
+            if self.xy_mouse_position is None:
+                self.xy_view.apply_transform(self.xy_transform)
+            else:
+                self.xy_view.apply_transform(self.xy_transform, self.xy_mouse_position)
+        if self.xz_transform is not None:
+            if self.xz_mouse_position is None:
+                self.xz_view.apply_transform(self.xz_transform)
+            else:
+                self.xz_view.apply_transform(self.xz_transform, self.xz_mouse_position)
+        if self.yz_transform is not None:
+            if self.yz_mouse_position is None:
+                self.yz_view.apply_transform(self.yz_transform)
+            else:
+                self.yz_view.apply_transform(self.yz_transform, self.yz_mouse_position)
         
     def numpyArrayToPixmap(self, img_np):
         img_np = np.require(img_np, np.uint8, 'C')
@@ -1001,19 +1066,16 @@ class MainWindow(QMainWindow):
             # Determine the coordinate indices based on the view plane
             
             if view_plane == "XY":
-                first_index, second_index, third_index = 0, 1, 2
                 z_plane_points = self.z_view_dict.get(point[2])
                 if not z_plane_points:
                     return
                 points_to_remove = [(p[0], p[1], point[2], p[2], p[3]) for p in z_plane_points if (p[3] == point[4] and math.dist((point[0], point[1]), (p[0], p[1])) <= self.eraser_radius)]
             elif view_plane == "XZ":
-                first_index, second_index, third_index = 0, 2, 1
                 y_plane_points = self.y_view_dict.get(point[1])
                 if not y_plane_points:
                     return
                 points_to_remove = [(p[1], point[1], p[0], p[2], p[3]) for p in y_plane_points if (p[3] == point[4] and math.dist((point[0], point[2]), (p[1], p[0])) <= self.eraser_radius)]
             elif view_plane == "YZ":
-                first_index, second_index, third_index = 1, 2, 0
                 x_plane_points = self.x_view_dict.get(point[0])
                 if not x_plane_points:
                     return
@@ -1021,13 +1083,6 @@ class MainWindow(QMainWindow):
             else:
                 return  # Invalid view_plane, nothing to remove
             
-            # points_to_remove = [
-            #     p for p in self.foreground_points
-            #     if (math.dist((point[first_index], point[second_index]), 
-            #                     (p[first_index], p[second_index])) <= self.eraser_radius and 
-            #         p[third_index] == point[third_index] and 
-            #         p[-2] == self.index_control.cell_index)
-            # ]
             pure_points_to_remove = [p[:3] for p in points_to_remove]
 
             self.foreground_points = [

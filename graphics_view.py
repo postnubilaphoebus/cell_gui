@@ -3,12 +3,13 @@ from PyQt5.QtWidgets import (QGraphicsScene,
                              QGraphicsView, 
                              QMessageBox)
 from cmaps import num_colors
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QTransform
 
 class GraphicsView(QGraphicsView):
+    viewUpdated = pyqtSignal(QTransform)
     def __init__(self, main_window, view_plane, parent=None):
         super().__init__(parent)
-        self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self.setResizeAnchor(QGraphicsView.NoAnchor)
         self.main_window = main_window
         self.view_plane = view_plane
@@ -35,6 +36,11 @@ class GraphicsView(QGraphicsView):
 
     def rotate_view(self, angle):
         self.rotate(angle)
+
+    def apply_transform(self, transform, mouse_position = None):
+        if mouse_position is not None:
+            self.centerOn(mouse_position)
+        self.setTransform(transform)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_1:
@@ -118,10 +124,13 @@ class GraphicsView(QGraphicsView):
                     self.main_window.update_yz_view()
         elif event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
             self.main_window.apply_watershed()
+        elif event.key() == Qt.Key_P:
+            self.main_window.switch_to_previous_tab()
+        elif event.key() == Qt.Key_N:
+            self.main_window.switch_to_next_tab()
         event.accept()
 
     def obtain_current_point(self, pixmap_item, event, view_plane):
-        import time
         if view_plane == "XY":
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
@@ -153,8 +162,16 @@ class GraphicsView(QGraphicsView):
         self.scale(factor, factor)
         delta = self.mapToScene(view_pos) - self.mapToScene(self.viewport().rect().center())
         self.centerOn(scene_pos - delta)
-        self.main_window.current_zoom_location = scene_pos - delta
         event.accept()
+        if self.view_plane == "XY":
+            self.main_window.xy_transform = self.transform()
+            self.main_window.xy_mouse_position = scene_pos
+        elif self.view_plane == "XZ":
+            self.main_window.xz_transform = self.transform()
+            self.main_window.xz_mouse_position = scene_pos
+        elif self.view_plane == "YZ":
+            self.main_window.yz_transform = self.transform()
+            self.main_window.yz_mouse_position = scene_pos
 
     def center_on_given_location(self, location):
         self.centerOn(location)
@@ -252,6 +269,11 @@ class GraphicsView(QGraphicsView):
                         self.main_window.update_xy_view()
                         self.main_window.update_xz_view()
                         self.main_window.update_yz_view()
+                        # num_points = 0
+                        # for p in self.main_window.foreground_points:
+                        #     if p[3] == cell_idx:
+                        #         num_points += 1
+                        # print("volume cell", num_points)
             else:
                 self.main_window.dragging = True
                 if self.main_window.local_contrast_enhancer_enabled:
