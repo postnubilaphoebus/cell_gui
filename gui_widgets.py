@@ -213,6 +213,8 @@ class MaskLoader(QThread):
         except:
             # mask saved as npy array
             mask = np.load(self.filename)
+            if np.issubdtype(mask.dtype, np.floating):
+                mask = mask.astype(int)
             assert mask.shape == self.parent.image_data.shape, "Mask shape does not match image shape"
             self.parent.background_points = []
             self.parent.foreground_points = []
