@@ -1,6 +1,7 @@
 # created with https://github.com/lmcinnes/glasbey
 # this package is sometimes stubborn to install, which is why it is hardcoded
 from PIL import ImageColor
+import numpy as np
 
 glasbey_cmap_100 = ['#d21820', '#1869ff', '#008a00', '#f36dff', '#710079', '#aafb00', '#00bec2', 
                 '#ffa235', '#5d3d04', '#08008a', '#005d5d', '#9a7d82', '#a2aeff', '#96b675', 
@@ -167,4 +168,5 @@ glasbey_cmap_20 = ['#d21820',
 
 glasbey_cmap = glasbey_map_1000
 glasbey_cmap_rgb = [ImageColor.getcolor(col, "RGB") for col in glasbey_cmap]
+glasbey_cmap_rgb = np.array(glasbey_cmap_rgb, dtype = np.uint32)
 num_colors = len(glasbey_cmap)

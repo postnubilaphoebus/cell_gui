@@ -5,11 +5,13 @@ from PyQt5.QtWidgets import (QGraphicsScene,
 from cmaps import num_colors
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QTransform
+import numpy as np
 
 class GraphicsView(QGraphicsView):
     viewUpdated = pyqtSignal(QTransform)
     def __init__(self, main_window, view_plane, parent=None):
         super().__init__(parent)
+        self.setAcceptDrops(True)
         self.setResizeAnchor(QGraphicsView.NoAnchor)
         self.main_window = main_window
         self.view_plane = view_plane
@@ -37,10 +39,40 @@ class GraphicsView(QGraphicsView):
     def rotate_view(self, angle):
         self.rotate(angle)
 
-    def apply_transform(self, transform, mouse_position = None):
-        if mouse_position is not None:
-            self.centerOn(mouse_position)
+    def focusInEvent(self, event):
+        self.setStyleSheet("border: 2px solid lightgreen;")
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        self.setStyleSheet("border: 1px solid black;")
+        super().focusOutEvent(event)
+
+    def dragEnterEvent(self, event):
+        # Let the MainWindow handle filedrops
+        if event.mimeData().hasUrls():
+            event.ignore()  
+        else:
+            event.ignore()  
+
+    def dropEvent(self, event):
+        # Let the MainWindow handle filedrops
+        event.ignore()  
+
+    def apply_transform(self, transform, mouse_position=None):
         self.setTransform(transform)
+        if self.view_plane == "XY":
+            v_scroll = self.main_window.xy_view_vertical_slider_val
+            h_scroll = self.main_window.xy_view_horizontal_slider_val
+        elif self.view_plane == "XZ":
+            v_scroll = self.main_window.xz_view_vertical_slider_val
+            h_scroll = self.main_window.xz_view_horizontal_slider_val
+        elif self.view_plane == "YZ":
+            v_scroll = self.main_window.yz_view_vertical_slider_val
+            h_scroll = self.main_window.yz_view_horizontal_slider_val
+        if h_scroll is not None:
+            self.horizontalScrollBar().setValue(h_scroll)
+        if v_scroll is not None:
+            self.verticalScrollBar().setValue(v_scroll)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_1:
@@ -68,24 +100,13 @@ class GraphicsView(QGraphicsView):
             step_size = self.main_window.sliderx.singleStep()
             self.main_window.sliderx.setValue(current_value + step_size)
         elif event.key() == Qt.Key_M:
-            if self.main_window.visualization_only:
-                if self.main_window.markers_enabled:
-                    if self.main_window.backup_greyscale is not None:
-                        self.main_window.backup_color = self.main_window.image_data
-                        self.main_window.image_data = self.main_window.backup_greyscale
-                else:
-                    if self.main_window.backup_color is not None:
-                        self.main_window.backup_greyscale = self.main_window.image_data
-                        self.main_window.image_data = self.main_window.backup_color
             self.main_window.markers_enabled = not self.main_window.markers_enabled
             self.main_window.update_xy_view()
             self.main_window.update_xz_view()
             self.main_window.update_yz_view()
         elif event.key() == Qt.Key_E:
             self.main_window.toggleEraser()
-        elif event.key() == Qt.Key_J:
-            self.main_window.visualization_mode()
-        elif event.key() == Qt.Key_F:
+        elif event.key() == Qt.Key_B:
             self.main_window.toggleForeground()
         elif event.key() == Qt.Key_B:
             self.main_window.toggleBackground()
@@ -101,29 +122,10 @@ class GraphicsView(QGraphicsView):
             self.main_window.findCell()
         elif event.key() == Qt.Key_S:
             self.main_window.select_cell()
-        elif event.key() == Qt.Key_L:
-            self.main_window.localContrastEnhancer()
         elif event.key() == Qt.Key_O:
             self.main_window.open_file_dialog()
         elif event.key() == Qt.Key_D:
             self.main_window.delete_cell()
-        elif event.key() == Qt.Key_X:
-            self.main_window.labelCorrections()
-        elif event.key() == Qt.Key_Plus:
-            if self.main_window.watershed_seeding_point and self.main_window.watershed_neighborhood_selection_enabled:
-                self.main_window.watershed_radius += 2
-                self.main_window.update_xy_view()
-                self.main_window.update_xz_view()
-                self.main_window.update_yz_view()
-        elif event.key() == Qt.Key_Minus:
-            if self.main_window.watershed_seeding_point and self.main_window.watershed_neighborhood_selection_enabled:
-                if self.main_window.watershed_radius > 1:
-                    self.main_window.watershed_radius -= 2
-                    self.main_window.update_xy_view()
-                    self.main_window.update_xz_view()
-                    self.main_window.update_yz_view()
-        elif event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
-            self.main_window.apply_watershed()
         elif event.key() == Qt.Key_P:
             self.main_window.switch_to_previous_tab()
         elif event.key() == Qt.Key_N:
@@ -135,21 +137,21 @@ class GraphicsView(QGraphicsView):
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
             z_index = self.main_window.slider.value()
-            return (lp.x(), lp.y(), z_index)
+            return np.array([lp.x(), lp.y(), z_index])#(lp.x(), lp.y(), z_index)
         elif view_plane == "XZ":
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
             y_index = self.main_window.slidery.value()
-            return (lp.y(), y_index, lp.x())
+            return np.array([lp.x(), y_index, lp.y()])#(lp.y(), y_index, lp.x())
         elif view_plane == "YZ":
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
             x_index = self.main_window.sliderx.value()
-            return (x_index, lp.y(), lp.x())
+            return np.array([x_index, lp.y(), lp.x()])#(x_index, lp.y(), lp.x())
         else:
             raise ValueError("Invalid viewplane.\
                              Choose among 'XY', 'XZ', 'YZ'")
-
+        
     def wheelEvent(self, event, recursion = True):
         if recursion:
             self.main_window.synchronize_wheeling(self.missing_view_planes, event)
@@ -166,19 +168,24 @@ class GraphicsView(QGraphicsView):
         if self.view_plane == "XY":
             self.main_window.xy_transform = self.transform()
             self.main_window.xy_mouse_position = scene_pos
+            self.main_window.xy_view_horizontal_slider_vale = self.horizontalScrollBar().value()
+            self.main_window.xy_view_vertical_slider_vale = self.verticalScrollBar().value()
         elif self.view_plane == "XZ":
             self.main_window.xz_transform = self.transform()
             self.main_window.xz_mouse_position = scene_pos
+            self.main_window.xz_view_horizontal_slider_vale = self.horizontalScrollBar().value()
+            self.main_window.xz_view_vertical_slider_vale = self.verticalScrollBar().value()
         elif self.view_plane == "YZ":
             self.main_window.yz_transform = self.transform()
             self.main_window.yz_mouse_position = scene_pos
+            self.main_window.yz_view_horizontal_slider_vale = self.horizontalScrollBar().value()
+            self.main_window.yz_view_vertical_slider_vale = self.verticalScrollBar().value()
 
     def center_on_given_location(self, location):
         self.centerOn(location)
 
-    #def synchronize_wheeling_between_tabs()
-
     def generate_nearby_points(self, center_point, fixed_dimension, distance):
+        
         x, y, z = center_point
         dimension_ranges = {'X': (y, z), 'Y': (x, z), 'Z': (x, y)}
         bounds = {
@@ -221,7 +228,19 @@ class GraphicsView(QGraphicsView):
             if self.main_window.delete_cell_enabled:
                 pixmap_item = self._pixmap_item
                 point = self.obtain_current_point(pixmap_item, event, self.view_plane)
-                if point:
+                image = pixmap_item.pixmap().toImage()
+                if self.view_plane == "XY":
+                    x = point[0]
+                    y = point[1]
+                elif self.view_plane == "XZ":
+                    x = point[0]
+                    y = point[2]
+                elif self.view_plane == "YZ":
+                    x = point[2]
+                    y = point[1]
+                color = image.pixelColor(x, y)
+                r, g, b, _ = color.getRgb()
+                if not (r == g == b):
                     mbox = QMessageBox.question(self,  
                              "Delete Cell",  
                              "Are you sure you want to delete this cell?", 
@@ -240,13 +259,6 @@ class GraphicsView(QGraphicsView):
                         self.main_window.remove_indices(indices_to_remove)
                 event.accept()
                 return
-            
-            if self.main_window.watershed_neighborhood_selection_enabled:
-                pixmap_item = self._pixmap_item
-                self.main_window.watershed_seeding_point = self.obtain_current_point(pixmap_item, event, self.view_plane)
-                self.main_window.update_xy_view()
-                self.main_window.update_xz_view()
-                self.main_window.update_yz_view()
 
             if not self.main_window.new_cell_selected \
                 and self.main_window.select_cell_enabled \
@@ -269,61 +281,31 @@ class GraphicsView(QGraphicsView):
                         self.main_window.update_xy_view()
                         self.main_window.update_xz_view()
                         self.main_window.update_yz_view()
-                        # num_points = 0
-                        # for p in self.main_window.foreground_points:
-                        #     if p[3] == cell_idx:
-                        #         num_points += 1
-                        # print("volume cell", num_points)
             else:
                 self.main_window.dragging = True
-                if self.main_window.local_contrast_enhancer_enabled:
+                if self.main_window.drawing and self.main_window.markers_enabled:
                     pixmap_item = self._pixmap_item
-                    sp = self.mapToScene(event.pos())
-                    lp = pixmap_item.mapFromScene(sp).toPoint()
-                    self.main_window.first_mouse_pos_for_contrast_rect = lp
-                else:
-                    if self.main_window.drawing and self.main_window.markers_enabled:
-                        pixmap_item = self._pixmap_item
-                        points = self.obtain_current_point(pixmap_item, event, self.view_plane)
+                    points = self.obtain_current_point(pixmap_item, event, self.view_plane)
 
-                        if self.main_window.foreground_enabled:
-                            if self.main_window.brush_width == 1:
-                                if points not in self.main_window.pure_coordinates:
-                                    points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
-                                    self.main_window.add_points(points)
-                            elif self.main_window.brush_width > 1:
-                                ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
-                                relevant_points = [pp for pp in ppoints if pp[:3] not in self.main_window.pure_coordinates]
-                                self.main_window.add_points(relevant_points)
-                                # for pp in ppoints:
-                                #     if pp[:3] not in self.main_window.pure_coordinates:
-                                #         self.main_window.add_points(pp)
-                        elif self.main_window.background_enabled:
-                            if self.main_window.brush_width == 1:
-                                if points not in self.main_window.pure_coordinates:
-                                    self.main_window.add_points(points, category = "background")
-                            elif self.main_window.brush_width > 1:
-                                ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
-                                for pp in ppoints:
-                                    if pp[:3] not in self.main_window.pure_coordinates:
-                                        self.main_window.add_points(pp[:3], category = "background")
-                        elif self.main_window.eraser_enabled:
-                            points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
-                            self.main_window.removePoints(points, self.view_plane)
-                        self.main_window.update_xy_view()
-                        self.main_window.update_xz_view()
-                        self.main_window.update_yz_view()
-                    else:
-                        self.main_window.last_mouse_pos = event.pos()
+                    if self.main_window.foreground_enabled:
+                        if self.main_window.brush_width == 1:
+                            if points not in self.main_window.pure_coordinates:
+                                points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
+                                self.main_window.add_points(points)
+                        elif self.main_window.brush_width > 1:
+                            ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
+                            relevant_points = [pp for pp in ppoints if pp[:3] not in self.main_window.pure_coordinates]
+                            self.main_window.add_points(relevant_points)
+                    elif self.main_window.eraser_enabled:
+                        points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
+                        self.main_window.removePoints(points, self.view_plane)
+                    self.main_window.update_xy_view()
+                    self.main_window.update_xz_view()
+                    self.main_window.update_yz_view()
+                else:
+                    self.main_window.last_mouse_pos = event.pos()
 
         elif event.button() == Qt.RightButton:
-
-            if self.main_window.watershed_neighborhood_selection_enabled:
-                self.main_window.watershed_seeding_point = None
-                self.main_window.watershed_radius = 2
-                self.main_window.update_xy_view()
-                self.main_window.update_xz_view()
-                self.main_window.update_yz_view()
 
             if self.main_window.copied_points:
                 view_plane_index = 2 if self.view_plane == 'XY' else 1 if self.view_plane == 'XZ' else 0
@@ -333,7 +315,6 @@ class GraphicsView(QGraphicsView):
                         new_point = list(p[:5])
                         new_point[view_plane_index] = slider_value
                         self.main_window.add_points(tuple(new_point))
-                        #self.main_window.foreground_points.append(tuple(new_point))
                 self.main_window.copied_points = []
                 self.main_window.update_xy_view()
                 self.main_window.update_xz_view()
@@ -357,47 +338,29 @@ class GraphicsView(QGraphicsView):
 
     def mouseMoveEvent(self, event):
 
-        if self.main_window.local_contrast_enhancer_enabled and self.main_window.dragging:
+        if self.main_window.drawing and self.main_window.dragging and self.main_window.markers_enabled:
             pixmap_item = self._pixmap_item
-            sp = self.mapToScene(event.pos())
-            lp = pixmap_item.mapFromScene(sp).toPoint()
-            self.main_window.last_mouse_pos_for_contrast_rect = lp
+            points = self.obtain_current_point(pixmap_item, event, self.view_plane)
+            if self.main_window.foreground_enabled:
+                if self.main_window.brush_width == 1:
+                    if points not in self.main_window.pure_coordinates:
+                        points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
+                        self.main_window.add_points(points)
+                elif self.main_window.brush_width > 1:
+                    ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
+                    relevant_points = [pp for pp in ppoints if pp[:3] not in self.main_window.pure_coordinates]
+                    self.main_window.add_points(relevant_points)
+            elif self.main_window.eraser_enabled:
+                points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
+                self.main_window.removePoints(points, self.view_plane)
             self.main_window.update_xy_view()
             self.main_window.update_xz_view()
             self.main_window.update_yz_view()
-        else:
-            if self.main_window.drawing and self.main_window.dragging and self.main_window.markers_enabled:
-                pixmap_item = self._pixmap_item
-                points = self.obtain_current_point(pixmap_item, event, self.view_plane)
-                if self.main_window.foreground_enabled:
-                    if self.main_window.brush_width == 1:
-                        if points not in self.main_window.pure_coordinates:
-                            points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
-                            self.main_window.add_points(points)
-                    elif self.main_window.brush_width > 1:
-                        ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
-                        relevant_points = [pp for pp in ppoints if pp[:3] not in self.main_window.pure_coordinates]
-                        self.main_window.add_points(relevant_points)
-                elif self.main_window.background_enabled:
-                    if self.main_window.brush_width == 1:
-                        if points not in self.main_window.pure_coordinates:
-                            self.main_window.add_points(points, category = "background")
-                    elif self.main_window.brush_width > 1:
-                        ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
-                        for pp in ppoints:
-                            if pp[:3] not in self.main_window.pure_coordinates:
-                                self.main_window.add_points(pp[:3], category = "background")
-                elif self.main_window.eraser_enabled:
-                    points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
-                    self.main_window.removePoints(points, self.view_plane)
-                self.main_window.update_xy_view()
-                self.main_window.update_xz_view()
-                self.main_window.update_yz_view()
-            elif self.main_window.dragging:
-                delta = event.pos() - self.main_window.last_mouse_pos
-                self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
-                self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-                self.main_window.last_mouse_pos = event.pos()
+        elif self.main_window.dragging:
+            delta = event.pos() - self.main_window.last_mouse_pos
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.main_window.last_mouse_pos = event.pos()
         event.accept()
 
     def mouseReleaseEvent(self, event):

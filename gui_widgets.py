@@ -1,19 +1,21 @@
-from PyQt5.QtWidgets import (QApplication, 
-                             QVBoxLayout, 
+from PyQt5.QtWidgets import (QApplication,
+                             QVBoxLayout,
                              QHBoxLayout,
-                             QWidget, 
-                             QSlider, 
-                             QPushButton, 
-                             QLabel,  
+                             QWidget,
+                             QSlider,
+                             QPushButton,
+                             QLabel,
                              QTextEdit)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QMovie
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QFormLayout, QSpinBox, QSlider, QDialog
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QFormLayout, QSpinBox, QSlider, QDialog, QMessageBox
 import numpy as np
 from tqdm import tqdm
 from cmaps import  num_colors
 from scipy.ndimage import find_objects
+import os
+import imageio.v3 as iio
+from numba import njit, types, typed
 
 class LoadingScreen(QWidget):
     def __init__(self, parent=None):
@@ -56,38 +58,38 @@ class LoadingScreen(QWidget):
             screen_center = screen_geometry.center()
             self.move(screen_center.x() - self.width() // 2,
                       screen_center.y() - self.height() // 2)
-            
+
 
 class WatershedDialog(QDialog):
     def __init__(self, image_block, min_shift, threshold, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Watershed Parameters")
-        
+
         self.initial_background_threshold = threshold
         self.current_threshold = threshold
         self.min_shift = min_shift
         self.image_block = image_block
-        
+
         self.layout = QVBoxLayout()
-        
+
         self.slider_label = QLabel(f"Threshold: {self.initial_background_threshold}", self)
         self.layout.addWidget(self.slider_label)
-        
+
         self.slider = QSlider(Qt.Horizontal, self)
-        self.slider.setRange(0, 255)  
+        self.slider.setRange(0, 255)
         self.slider.setValue(self.initial_background_threshold)
         self.slider.valueChanged.connect(self.update_preview)
         self.layout.addWidget(self.slider)
-        
+
         self.preview_label = QLabel(self)
         self.layout.addWidget(self.preview_label)
-        
+
         self.ok_button = QPushButton("OK", self)
         self.ok_button.clicked.connect(self.accept)
         self.layout.addWidget(self.ok_button)
-        
+
         self.setLayout(self.layout)
-        
+
         # Call initial preview update
         self.update_preview()
 
@@ -97,7 +99,7 @@ class WatershedDialog(QDialog):
         if self.parent:
             self.parent().watershed_background_threshold = self.current_threshold
             mask = self.image_block > self.current_threshold
-            keep_points = np.argwhere(mask) 
+            keep_points = np.argwhere(mask)
             keep_points += self.min_shift
             keep_points = keep_points[:, [2, 1, 0]]
             self.parent().watershed_foreground_points = keep_points
@@ -105,18 +107,18 @@ class WatershedDialog(QDialog):
             self.parent().update_xz_view()
             self.parent().update_yz_view()
 
-            
+
 class ThresholdDialog(QDialog):
     def __init__(self, image_min, image_max, background_threshold, cell_centre_threshold, parent=None):
         super().__init__(parent)
-        
+
         self.setWindowTitle("Set Thresholds")
-        
+
         self.image_min = image_min
         self.image_max = image_max
         self.background_threshold = background_threshold
         self.cell_centre_threshold = cell_centre_threshold
-        
+
         # Create layout
         layout = QFormLayout()
 
@@ -124,64 +126,133 @@ class ThresholdDialog(QDialog):
         self.background_slider = QSlider(Qt.Horizontal, self)
         self.background_slider.setRange(image_min, image_max)
         self.background_slider.setValue(background_threshold)
-        
+
         self.background_spinbox = QSpinBox(self)
         self.background_spinbox.setRange(image_min, image_max)
         self.background_spinbox.setValue(background_threshold)
-        
+
         self.cell_centre_slider = QSlider(Qt.Horizontal, self)
         self.cell_centre_slider.setRange(image_min, image_max)
         self.cell_centre_slider.setValue(cell_centre_threshold)
-        
+
         self.cell_centre_spinbox = QSpinBox(self)
         self.cell_centre_spinbox.setRange(image_min, image_max)
         self.cell_centre_spinbox.setValue(cell_centre_threshold)
-        
+
         # Add widgets to layout
         layout.addRow(QLabel("Background Threshold:"), self.background_slider)
         layout.addRow("", self.background_spinbox)
         layout.addRow(QLabel("Cell Centre Threshold:"), self.cell_centre_slider)
         layout.addRow("", self.cell_centre_spinbox)
-        
+
         # Create and add buttons
         button_layout = QVBoxLayout()
         self.ok_button = QPushButton("OK", self)
         self.cancel_button = QPushButton("Cancel", self)
         button_layout.addWidget(self.ok_button)
         button_layout.addWidget(self.cancel_button)
-        
+
         layout.addRow(button_layout)
-        
+
         self.setLayout(layout)
-        
+
         # Connect signals
         self.background_slider.valueChanged.connect(self.background_spinbox.setValue)
         self.background_spinbox.valueChanged.connect(self.background_slider.setValue)
         self.cell_centre_slider.valueChanged.connect(self.cell_centre_spinbox.setValue)
         self.cell_centre_spinbox.valueChanged.connect(self.cell_centre_slider.setValue)
-        
+
         self.ok_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
 
     def get_values(self):
         # Return the adjusted values
         return (self.background_slider.value(), self.cell_centre_slider.value())
+    
+@njit
+def filter_points(points, index_value):
+    # example: return all points whose last column == index_value
+    count = 0
+    for i in range(points.shape[0]):
+        if points[i, -1] == index_value:
+            count += 1
+
+    result = np.empty((count, points.shape[1]), dtype=points.dtype)
+    pos = 0
+    for i in range(points.shape[0]):
+        if points[i, -1] == index_value:
+            result[pos, :] = points[i, :]
+            pos += 1
+    return result
+
+# Step 2: pure Python function to build the dictionary
+def group_points_sparse(points):
+    # points shape: (N, 3) where last column is index
+    index_values = points[:, -1].astype(int)
+    unique_indices = np.unique(index_values)
+
+    groups = {}
+    for idx in unique_indices:
+        mask = (index_values == idx)
+        group_points = points[mask][:, :2]  # only x, y columns
+        groups[idx] = group_points
+
+    return groups
+    
+class SliceLoader(QThread):
+        finished = pyqtSignal(dict, str)
+        def __init__(self, parent, view_plane, slice_index, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.parent = parent
+            self._view_plane = view_plane
+            self._slice_index = slice_index
+
+        def run(self):
+            if self._view_plane == "XY":
+                relevant_points = self.parent.z_view_dict.get(self._slice_index)
+            elif self._view_plane == "XZ":
+                relevant_points = self.parent.y_view_dict.get(self._slice_index)
+            elif self._view_plane == "YZ":
+                relevant_points = self.parent.x_view_dict.get(self._slice_index)
+            if relevant_points:
+                grouped_points = group_points_sparse(np.array(relevant_points))
+                self.finished.emit(grouped_points, self._view_plane)
+            else:
+                self.finished.emit({}, self._view_plane)
 
 class MaskLoader(QThread):
-    finished = pyqtSignal() 
-    progress = pyqtSignal(int) 
+    finished = pyqtSignal()
+    progress = pyqtSignal(int)
+    error_signal = pyqtSignal(str)
+    user_answer_received = pyqtSignal(bool)
+    ask_user_signal = pyqtSignal()
 
     def __init__(self, parent, filename, load_background=False):
         super().__init__()
         self.parent = parent
         self.filename = filename
         self.load_background = load_background
+        self.minimum_index = None
+        self.mask = None
 
     def run(self):
-        assert self.filename.endswith(".npy"), "Mask file must end with .npy"
-        try:
+        #assert self.filename.endswith(".npy"), "Mask file must end with .npy"
+        ext = os.path.splitext(self.filename)[1].lower()
+        if ext == '.npy':
+            mask = np.load(self.filename, allow_pickle='TRUE')#.item()
+        else:
+            mask = iio.imread(self.filename)
+        if isinstance(mask, np.ndarray) and mask.dtype == object and mask.ndim == 0:
             # mask saved as dict
-            mask = np.load(self.filename, allow_pickle='TRUE').item()
+            mask = mask.item()
+            if np.issubdtype(mask.dtype, np.floating):
+                mask = mask.astype(int)
+            if mask.shape != self.parent.image_data.shape:
+                self.error_signal.emit("Mask shape does not match image shape")
+                self.finished.emit()
+                return None
+            self.mask = mask
+            #assert mask.shape == self.parent.image_data.shape, f"Mask shape does not match image shape {mask.shape} != {self.parent.image_data.shape}"
             self.parent.background_points = []
             self.parent.foreground_points = []
             self.parent.z_view_dict = {}
@@ -210,12 +281,21 @@ class MaskLoader(QThread):
                     if i > self.parent.index_control.cell_index:
                         self.parent.index_control.cell_index = i
                 self.progress.emit(i)
-        except:
+        else:
             # mask saved as npy array
-            mask = np.load(self.filename)
+            # mask = np.load(self.filename)
             if np.issubdtype(mask.dtype, np.floating):
                 mask = mask.astype(int)
-            assert mask.shape == self.parent.image_data.shape, "Mask shape does not match image shape"
+            if mask.shape != self.parent.image_data.shape:
+                self.error_signal.emit("Mask shape does not match image shape")
+                self.finished.emit()
+                return None
+            self.mask = mask
+            if mask.min() > 0:
+                self.ask_user_signal.emit()
+                return
+                #if self.minimum_index is not None:
+            #assert mask.shape == self.parent.image_data.shape, f"Mask shape does not match image shape {mask.shape} != {self.parent.image_data.shape}"
             self.parent.background_points = []
             self.parent.foreground_points = []
             self.parent.z_view_dict = {}
@@ -247,15 +327,78 @@ class MaskLoader(QThread):
                         self.parent.index_control.cell_index = i
                 self.progress.emit(i)
 
+        #self.finish_work()
+        self.parent.z_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.z_view_dict.items()}
+        self.parent.y_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.y_view_dict.items()}
+        self.parent.x_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.x_view_dict.items()}
+
         self.parent.foreground_points = sorted(self.parent.foreground_points, key=lambda x: x[-1])
-        if self.parent.data_per_tab[self.parent.current_tab_index].get("foreground_points") is not None:
-            self.parent.data_per_tab[self.parent.current_tab_index]["foreground_points"] = self.parent.foreground_points
-            self.parent.data_per_tab[self.parent.current_tab_index]["pure_coordinates"] = self.parent.pure_coordinates
-            self.parent.data_per_tab[self.parent.current_tab_index]["z_view_dict"] = self.parent.z_view_dict
-            self.parent.data_per_tab[self.parent.current_tab_index]["y_view_dict"] = self.parent.y_view_dict
-            self.parent.data_per_tab[self.parent.current_tab_index]["x_view_dict"] = self.parent.x_view_dict
+        current_tab = self.parent.tab_widget.currentWidget()
+        #if self.parent.data_per_tab[current_tab].get("foreground_points") is not None:
+        self.parent.data_per_tab[current_tab]["foreground_points"] = self.parent.foreground_points
+        self.parent.data_per_tab[current_tab]["pure_coordinates"] = self.parent.pure_coordinates
+        self.parent.data_per_tab[current_tab]["z_view_dict"] = self.parent.z_view_dict
+        self.parent.data_per_tab[current_tab]["y_view_dict"] = self.parent.y_view_dict
+        self.parent.data_per_tab[current_tab]["x_view_dict"] = self.parent.x_view_dict
         self.parent.current_highest_cell_index = self.parent.index_control.cell_index
         self.finished.emit()
+
+    def continue_work(self, answer):
+        self.parent.background_points = []
+        self.parent.foreground_points = []
+        self.parent.z_view_dict = {}
+        self.parent.y_view_dict = {}
+        self.parent.x_view_dict = {}
+        print("loading masks...")
+        mask = self.mask
+        if answer:
+            mask = mask - mask.min()
+        slices = find_objects(mask)
+        for i, slice_tuple in enumerate(tqdm(slices), start=1):
+            if slice_tuple is not None:
+                local_locs = np.array(np.where(mask[slice_tuple] == i))
+                global_locs = np.stack(local_locs).T + np.array([s.start for s in slice_tuple])
+                color_idx = i % num_colors
+                for loc in global_locs:
+                    z, y, x = loc
+                    self.parent.pure_coordinates.append((x, y, z))
+                    self.parent.foreground_points.append((x, y, z, i, color_idx))
+                    if z not in self.parent.z_view_dict:
+                        self.parent.z_view_dict[z] = []
+                    self.parent.z_view_dict[z].append((x, y, i, color_idx))
+                    if y not in self.parent.y_view_dict:
+                        self.parent.y_view_dict[y] = []
+                    self.parent.y_view_dict[y].append((z, x, i, color_idx))
+                    if x not in self.parent.x_view_dict:
+                        self.parent.x_view_dict[x] = []
+                    self.parent.x_view_dict[x].append((z, y, i, color_idx))
+                    if self.load_background:
+                        self.parent.background_points.append((x, y, z, i, color_idx))
+                if i > self.parent.index_control.cell_index:
+                    self.parent.index_control.cell_index = i
+            self.progress.emit(i)
+
+        self.parent.z_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.z_view_dict.items()}
+        self.parent.y_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.y_view_dict.items()}
+        self.parent.x_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.x_view_dict.items()}
+
+        self.finish_work()
+
+    def finish_work(self):
+        self.parent.foreground_points = sorted(self.parent.foreground_points, key=lambda x: x[-1])
+        current_tab = self.parent.tab_widget.currentWidget()
+        #if self.parent.data_per_tab[current_tab].get("foreground_points") is not None:
+        self.parent.data_per_tab[current_tab]["foreground_points"] = self.parent.foreground_points
+        self.parent.data_per_tab[current_tab]["pure_coordinates"] = self.parent.pure_coordinates
+        self.parent.data_per_tab[current_tab]["z_view_dict"] = self.parent.z_view_dict
+        self.parent.data_per_tab[current_tab]["y_view_dict"] = self.parent.y_view_dict
+        self.parent.data_per_tab[current_tab]["x_view_dict"] = self.parent.x_view_dict
+        self.parent.current_highest_cell_index = self.parent.index_control.cell_index
+        self.finished.emit()
+
+    @pyqtSlot(bool)
+    def on_user_answer(self, answer):
+        self.continue_work(answer)
 
 class Estimating_Cell_Thresholds(QThread):
     finished = pyqtSignal()  # Signal to indicate the task is finished
@@ -302,7 +445,7 @@ class Estimating_Cell_Thresholds(QThread):
 class IndexControlWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        
+
         self.cell_index = 1
         layout = QHBoxLayout()
         self.decrease_button = QPushButton('<')
@@ -314,14 +457,14 @@ class IndexControlWidget(QWidget):
         self.increase_button.clicked.connect(self.increase_index)
         layout.addWidget(self.increase_button)
         self.setLayout(layout)
-        
+
     def decrease_index(self):
         if self.cell_index == 1:
             return
         self.cell_index -= 1
         self.index_label.setText(str(self.cell_index))
         self.repaint()
-        
+
     def increase_index(self):
         self.cell_index += 1
         self.index_label.setText(str(self.cell_index))
@@ -336,11 +479,11 @@ class IndexControlWidget(QWidget):
 class TextDisplay(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setReadOnly(True)  
+        self.setReadOnly(True)
         self.setMaximumHeight(40)
         self.setMaximumWidth(170)
         self.setAlignment(Qt.AlignCenter)
-        
+
     def update_text(self, number, highest_index):
         self.setText("Selected Cell Index: " + str(number) + " \nHighest Cell Index: " + str(highest_index))
         self.repaint()
