@@ -375,7 +375,6 @@ class MainWindow(QMainWindow):
 
             # Create views for XY, XZ, and YZ planes
             xy_view = GraphicsView(self, "XY")
-            #xy_view = GraphicsViewVispy(self, "XY")
             xz_view = GraphicsView(self, "XZ")
             yz_view = GraphicsView(self, "YZ")
 
@@ -391,35 +390,32 @@ class MainWindow(QMainWindow):
             xz_box = QHBoxLayout()
             yz_box = QHBoxLayout()
 
+            pixmapxy = QPixmap()
+            pixmapxy.fill(Qt.white)
+            pixmapxz = QPixmap()
+            pixmapxz.fill(Qt.white)
+            pixmapyz = QPixmap()
+            pixmapyz.fill(Qt.white)
+
+            xy_view.setPixmap(pixmapxy)
+            xz_view.setPixmap(pixmapxz)
+            yz_view.setPixmap(pixmapyz)
+
             xy_box.addWidget(xy_view)
             xz_box.addWidget(xz_view)
             yz_box.addWidget(yz_view)
 
+            label = QLabel("xy view")
+            label.setAlignment(Qt.AlignCenter)
+            xy_box.addWidget(label)
 
-            if image_data is not None:
+            label = QLabel("xz view")
+            label.setAlignment(Qt.AlignCenter)
+            xz_box.addWidget(label)
 
-                # Set the image data for the views
-                xy_view.setPixmap(QPixmap.fromImage(image_data))
-                xz_view.setPixmap(QPixmap.fromImage(image_data))
-                yz_view.setPixmap(QPixmap.fromImage(image_data))
-
-            else:
-                pixmapxy = QPixmap()
-                pixmapxy.fill(Qt.white)
-                pixmapxz = QPixmap()
-                pixmapxz.fill(Qt.white)
-                pixmapyz = QPixmap()
-                pixmapyz.fill(Qt.white)
-
-                xy_view.setPixmap(pixmapxy)
-                xz_view.setPixmap(pixmapxz)
-                yz_view.setPixmap(pixmapyz)
-
-            # Add the views to the layout
-            # layout.addWidget(xy_view, stretch=1)# stretch=1
-            # #layout.addWidget(xy_view.get_qt_widget(), stretch=1)
-            # layout.addWidget(xz_view, stretch=1)
-            # layout.addWidget(yz_view, stretch=1)
+            label = QLabel("yz view")
+            label.setAlignment(Qt.AlignCenter)
+            yz_box.addWidget(label)
 
             layout.addLayout(xy_box, stretch=1)
             layout.addLayout(xz_box, stretch=1)
@@ -427,8 +423,6 @@ class MainWindow(QMainWindow):
 
             # Add the widget to the tab widget
             self.tab_widget.addTab(image_view_widget, image_name)
-
-            # Optionally store references to the views for further updates
             self.xy_view = xy_view
             self.xz_view = xz_view
             self.yz_view = yz_view
@@ -452,6 +446,8 @@ class MainWindow(QMainWindow):
             yz_view.rotate_view(-90)
             xz_view.rotate_view(-90)
 
+            
+
             xy_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             xz_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             yz_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -467,6 +463,18 @@ class MainWindow(QMainWindow):
             xy_box.addWidget(xy_view)
             xz_box.addWidget(xz_view)
             yz_box.addWidget(yz_view)
+
+            label = QLabel("xy view")
+            label.setAlignment(Qt.AlignCenter)
+            xy_box.addWidget(label)
+
+            label = QLabel("xz view")
+            label.setAlignment(Qt.AlignCenter)
+            xz_box.addWidget(label)
+
+            label = QLabel("yz view")
+            label.setAlignment(Qt.AlignCenter)
+            yz_box.addWidget(label)
 
             layout.addLayout(xy_box, stretch=1)
             layout.addLayout(xz_box, stretch=1)
@@ -572,9 +580,21 @@ class MainWindow(QMainWindow):
             xy_box = QHBoxLayout()
             xz_box = QHBoxLayout()
             yz_box = QHBoxLayout()
+            
             xy_box.addWidget(xy_view)
             xz_box.addWidget(xz_view)
             yz_box.addWidget(yz_view)
+            label = QLabel("xy view")
+            label.setAlignment(Qt.AlignCenter)
+            xy_box.addWidget(label)
+
+            label = QLabel("xz view")
+            label.setAlignment(Qt.AlignCenter)
+            xz_box.addWidget(label)
+
+            label = QLabel("yz view")
+            label.setAlignment(Qt.AlignCenter)
+            yz_box.addWidget(label)
             layout.addLayout(xy_box, stretch=1)
             layout.addLayout(xz_box, stretch=1)
             layout.addLayout(yz_box, stretch=1)
