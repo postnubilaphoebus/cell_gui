@@ -15,7 +15,6 @@ from cmaps import  num_colors
 from scipy.ndimage import find_objects
 import os
 import imageio.v3 as iio
-from numba import njit, types, typed
 
 class LoadingScreen(QWidget):
     def __init__(self, parent=None):
@@ -168,22 +167,6 @@ class ThresholdDialog(QDialog):
     def get_values(self):
         # Return the adjusted values
         return (self.background_slider.value(), self.cell_centre_slider.value())
-    
-@njit
-def filter_points(points, index_value):
-    # example: return all points whose last column == index_value
-    count = 0
-    for i in range(points.shape[0]):
-        if points[i, -1] == index_value:
-            count += 1
-
-    result = np.empty((count, points.shape[1]), dtype=points.dtype)
-    pos = 0
-    for i in range(points.shape[0]):
-        if points[i, -1] == index_value:
-            result[pos, :] = points[i, :]
-            pos += 1
-    return result
 
 # Step 2: pure Python function to build the dictionary
 def group_points_sparse(points):
