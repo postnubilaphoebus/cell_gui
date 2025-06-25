@@ -16,22 +16,13 @@ from PyQt5.QtWidgets import (QApplication,
                              QTabWidget)
 from PyQt5.QtCore import Qt, QSize, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QCursor
-import matplotlib.ticker as mticker
 import math
 from scipy.ndimage import label, find_objects
 from cmaps import glasbey_cmap, glasbey_cmap_rgb
 from gui_widgets import *
 from graphics_view import GraphicsView
 import imageio.v3 as iio
-from numba import njit
-
-
-@njit
-def fast_indexing(indices, colormap):
-  out = np.empty((indices.shape[0], 3), dtype=np.uint8)
-  for i in range(indices.shape[0]):
-    out[i] = colormap[indices[i]]
-  return out
+from skimage.measure import find_contours
 
 class MainWindow(QMainWindow):
     label_shift_answer = pyqtSignal(bool)
@@ -190,7 +181,7 @@ class MainWindow(QMainWindow):
         layout_buttons.addWidget(self.eraser_button)
 
         self.save_button = QPushButton('Save Masks', self)
-        self.save_button.clicked.connect(self.saveMasks)
+        self.save_button.clicked.connect(self.save_file)
         layout_buttons.addWidget(self.save_button)
 
         self.find_cell_button = QPushButton('Find Cell (C)', self)
@@ -292,7 +283,6 @@ class MainWindow(QMainWindow):
         self.z_view_dict = {}
         self.y_view_dict = {}
         self.x_view_dict = {}
-        self.pure_coordinates = []
         self.copied_points = []
         self.relevant_xy_points = {}
         self.relevant_xz_points = {}
@@ -307,6 +297,7 @@ class MainWindow(QMainWindow):
         self.relevant_xy_points_loaded = False
         self.relevant_xz_points_loaded = False
         self.relevant_yz_points_loaded = False
+        self.alpha_label_index = None
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -514,7 +505,6 @@ class MainWindow(QMainWindow):
             self.z_view_dict = {}
             self.y_view_dict = {}
             self.x_view_dict = {}
-            self.pure_coordinates = []
             self.copied_points = []
 
 
@@ -553,7 +543,6 @@ class MainWindow(QMainWindow):
                 "z_view_dict": {k: v.copy() for k, v in self.z_view_dict.items()},#self.z_view_dict.copy(),
                 "y_view_dict": {k: v.copy() for k, v in self.y_view_dict.items()},#self.y_view_dict.copy(),
                 "x_view_dict": {k: v.copy() for k, v in self.x_view_dict.items()},# self.x_view_dict.copy(),
-                "pure_coordinates": self.pure_coordinates.copy(),
                 "copied_points": self.copied_points.copy()
             }
             self.initial_view += 1
@@ -631,7 +620,6 @@ class MainWindow(QMainWindow):
             self.z_view_dict = {}
             self.y_view_dict = {}
             self.x_view_dict = {}
-            self.pure_coordinates = []
             self.copied_points = []
 
             # layout.addWidget(xy_view, stretch=1)
@@ -667,7 +655,6 @@ class MainWindow(QMainWindow):
                 "z_view_dict": {k: v.copy() for k, v in self.z_view_dict.items()},#self.z_view_dict.copy(),
                 "y_view_dict": {k: v.copy() for k, v in self.y_view_dict.items()},#self.y_view_dict.copy(),
                 "x_view_dict": {k: v.copy() for k, v in self.x_view_dict.items()},#self.x_view_dict.copy(),
-                "pure_coordinates": self.pure_coordinates.copy(),
                 "copied_points": self.copied_points.copy()
             }
             self.tab_widget.setCurrentWidget(image_view_widget)
@@ -675,6 +662,7 @@ class MainWindow(QMainWindow):
     def on_tab_changed(self, index):
         self.current_tab_index = index
         current_tab = self.tab_widget.currentWidget()
+        self.alpha_label_index = None
         if self.data_per_tab.get(current_tab)is not None:
             self.update_tab_view(index)
             self.update_xy_view()
@@ -732,20 +720,43 @@ class MainWindow(QMainWindow):
         self.z_view_dict = self.data_per_tab[current_tab].get("z_view_dict")
         self.y_view_dict = self.data_per_tab[current_tab].get("y_view_dict")
         self.x_view_dict = self.data_per_tab[current_tab].get("x_view_dict")
-        self.pure_coordinates = self.data_per_tab[current_tab].get("pure_coordinates")
         self.copied_points = []
         self.synch_transform()
         
-    def numpyArrayToPixmap(self, img_np):
-        img_np = np.require(img_np, np.uint8, 'C')
-        if img_np.ndim == 3 and img_np.shape[2] == 3:
-            qim = QImage(img_np.data, img_np.shape[1], img_np.shape[0], img_np.strides[0], QImage.Format_RGB888)
+    # def numpyArrayToPixmap(self, img_np):
+    #     img_np = np.require(img_np, np.uint8, 'C')
+    #     if img_np.ndim == 3 and img_np.shape[2] == 3:
+    #         qim = QImage(img_np.data, img_np.shape[1], img_np.shape[0], img_np.strides[0], QImage.Format_RGB888)
+    #     else:
+    #         qim = QImage(img_np.data, img_np.shape[1], 
+    #                      img_np.shape[0], img_np.strides[0], 
+    #                      QImage.Format_Indexed8)
+    #     pixmap = QPixmap.fromImage(qim)
+    #     return pixmap
+    
+    def numpyArrayToPixmap(self, arr: np.ndarray) -> QPixmap:
+        arr = np.require(arr, np.uint8, 'C')
+        if arr.ndim == 3:
+            h, w, c = arr.shape
+            if c == 4:
+                fmt = QImage.Format_RGBA8888
+            elif c == 3:
+                fmt = QImage.Format_RGB888
+            else:
+                raise ValueError("Unsupported number of channels")
+
+            image = QImage(arr.data, w, h, arr.strides[0], fmt)
+            return QPixmap.fromImage(image)
         else:
-            qim = QImage(img_np.data, img_np.shape[1], 
-                         img_np.shape[0], img_np.strides[0], 
-                         QImage.Format_Indexed8)
-        pixmap = QPixmap.fromImage(qim)
-        return pixmap
+            if arr.ndim == 3 and arr.shape[2] == 3:
+                qim = QImage(arr.data, arr.shape[1], arr.shape[0], arr.strides[0], QImage.Format_RGB888)
+            else:
+                qim = QImage(arr.data, arr.shape[1], 
+                            arr.shape[0], arr.strides[0], 
+                            QImage.Format_Indexed8)
+            pixmap = QPixmap.fromImage(qim)
+            return pixmap
+
 
     def imagej_auto_contrast(self, image, saturated=0.35):
         image = image.astype(np.float32)
@@ -890,7 +901,6 @@ class MainWindow(QMainWindow):
             filename, _ = QFileDialog.getSaveFileName(self, 'Save File')
             if not filename:
                 return
-
         z_dimension = mask.shape[0]
         for i in range(z_dimension):
             xy_points = self.z_view_dict.get(i)
@@ -930,9 +940,13 @@ class MainWindow(QMainWindow):
             self.select_cell_button.setStyleSheet("background-color: lightgreen")
         else:
             self.select_cell_button.setStyleSheet("")
+            self.alpha_label_index = None
             self.new_cell_selected = False
             self.index_control.cell_index = self.current_highest_cell_index
             self.update_index_display()
+            self.update_xy_view()
+            self.update_xz_view()
+            self.update_yz_view()
             self.index_control.update_index(self.index_control.cell_index, self.current_highest_cell_index)
         self.repaint()
 
@@ -955,25 +969,6 @@ class MainWindow(QMainWindow):
 
     def update_index_display(self):
         self.cell_idx_display.update_text(self.index_control.cell_index, self.current_highest_cell_index)
-    
-    def plot_hist(self):
-        ax = self.hist_figure.add_subplot(111)
-        ax.hist(self.image_data.ravel(), bins=int(self.max_pixel_intensity), range=(self.min_pixel_intensity, self.max_pixel_intensity))
-        ax.set_title('Histogram of Pixel Intensities')
-        ax.set_ylabel("Bin pixel count")
-        ax.set_xlabel("Pixel intensity")
-        # Define a function for metric formatting
-        def metric_format(x, pos):
-            if x >= 1e6:
-                return f'{x*1e-6:.0f}M'  
-            elif x >= 1e3:
-                return f'{x*1e-3:.0f}K'  
-            else:
-                return f'{x:.0f}'  
-
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(metric_format))
-        self.hist_canvas.draw()
-        self.hist_canvas.draw()
 
     def toggleForeground(self):
         if not self.foreground_enabled:
@@ -1064,242 +1059,250 @@ class MainWindow(QMainWindow):
         self.update_xz_view()
         self.update_yz_view()
 
+    def remove_pts_slice_view_dicts(self, temp_z_view_removal_dict, 
+                                    temp_y_view_removal_dict, 
+                                    temp_x_view_removal_dict):
+        
+        # get the indices to remove
+        for k, v in temp_z_view_removal_dict.items():
+            np_z_pts = self.z_view_dict.get(k)
+            if np_z_pts is not None:
+                coors_present = np_z_pts[:, :2]
+                v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
+                coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
+                occupied_mask = np.isin(coors_rows, v_rows)  
+                indices_to_remove = np.argwhere(occupied_mask).flatten()
+                if indices_to_remove.size == 0:
+                    continue
+                self.z_view_dict[k] = np.delete(np_z_pts, indices_to_remove, axis=0)
+        for k, v in temp_y_view_removal_dict.items():
+            np_y_pts = self.y_view_dict.get(k)
+            if np_y_pts is not None:
+                coors_present = np_y_pts[:, :2]
+                v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
+                coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
+                occupied_mask = np.isin(coors_rows, v_rows) 
+                indices_to_remove = np.argwhere(occupied_mask).flatten()
+                if indices_to_remove.size == 0:
+                    continue
+                self.y_view_dict[k] = np.delete(np_y_pts, indices_to_remove, axis=0)
+        for k, v in temp_x_view_removal_dict.items():
+            np_x_pts = self.x_view_dict.get(k)
+            if np_x_pts is not None:
+                coors_present = np_x_pts[:, :2]
+                v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
+                coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
+                occupied_mask = np.isin(coors_rows, v_rows) 
+                indices_to_remove = np.argwhere(occupied_mask).flatten()
+                if indices_to_remove.size == 0:
+                    continue
+                self.x_view_dict[k] = np.delete(np_x_pts, indices_to_remove, axis=0)
+        
+
     def removePoints(self, point, view_plane):
         if self.eraser_enabled and self.markers_enabled:
             # Determine the coordinate indices based on the view plane
-            import time
             if view_plane == "XY":
-                t0 = time.perf_counter()
-                z_plane_points = self.z_view_dict.get(point[2])
-                if z_plane_points is None:
-                    return
-                # points_to_remove = points[label_mask][close_mask]
-                # point_1_column = np.full((points_to_remove.shape[0], 1), point[1])
-                # points_to_remove = np.hstack((points_to_remove[:, :1], point_1_column, points_to_remove[:, 1:]))
-                #points_to_remove = [(p[0], p[1], point[2], p[2], p[3]) for p in z_plane_points if (p[3] == point[4] and math.dist((point[0], point[1]), (p[0], p[1])) <= self.eraser_radius)]
-                radius = self.eraser_radius
-                px, py = point[0], point[1]
-                target_label = point[4]
-
-                points_to_remove = [
-                (p[0], p[1], point[2], p[2], p[3])
-                for p in z_plane_points
-                if (p[3] == target_label and
-                    abs(p[0] - px) <= radius and
-                    abs(p[1] - py) <= radius and
-                    math.dist((px, py), (p[0], p[1])) <= radius)
-                ]
-                #print("first points removed")
-                t1 = time.perf_counter()
-            elif view_plane == "XZ":
-                y_plane_points = self.y_view_dict.get(point[1])
-                if y_plane_points is None:
-                    return
-                radius = self.eraser_radius
-                px, pz = point[0], point[2]
-                target_label = point[4]
-
-                points_to_remove = [
-                (p[1], point[1], p[0], p[2], p[3])
-                for p in y_plane_points
-                if (p[3] == target_label and
-                    abs(p[0] - px) <= radius and
-                    abs(p[1] - pz) <= radius and
-                    math.dist((px, pz), (p[1], p[0])) <= radius)
-                ]
-                #print("second points removed")
-                t2 = time.perf_counter()
-                #points_to_remove = [(p[1], point[1], p[0], p[2], p[3]) for p in y_plane_points if (p[3] == point[4] and math.dist((point[0], point[2]), (p[1], p[0])) <= self.eraser_radius)]
-            elif view_plane == "YZ":
-                x_plane_points = self.x_view_dict.get(point[0])
-                if x_plane_points is None:
-                    return
-                radius = self.eraser_radius
-                py, pz = point[1], point[2]
-                target_label = point[4]
-
-                points_to_remove = [
-                (point[0], p[1], p[0], p[2], p[3])
-                for p in x_plane_points
-                if (p[3] == target_label and
-                    abs(p[0] - py) <= radius and
-                    abs(p[1] - pz) <= radius and
-                    math.dist((py, pz), (p[1], p[0])) <= radius)
-                ]
-                #print("third points removed")
-                t3 = time.perf_counter()
-                #points_to_remove = [(point[0], p[1], p[0], p[2], p[3]) for p in x_plane_points if (p[3] == point[4] and math.dist((point[1], point[2]), (p[1], p[0])) <= self.eraser_radius)]
-                points_to_remove = [(point[0], p[1], p[0], p[2], p[3]) for p in x_plane_points if (p[3] == point[4] and math.dist((point[1], point[2]), (p[1], p[0])) <= self.eraser_radius)]
-            else:
-                return  # Invalid view_plane, nothing to remove
-            
-            points_to_remove = np.array(points_to_remove)
-            t1 = time.perf_counter()
-            
-            pure_points_to_remove = points_to_remove[:, :3]
-            #pure_points_to_remove = points_to_remove[:, :3]
-            t2 = time.perf_counter()
-
-
-            # self.foreground_points = [
-            #     p for p in self.foreground_points if p not in points_to_remove
-            # ]
-            foreground_points = self.foreground_points
-
-            mask = ~np.isin(foreground_points, points_to_remove)
-
-            self.foreground_points = foreground_points[mask]
-
-            points_to_remove_set = set(points_to_remove)
-            self.foreground_points = [
-                p for p in self.foreground_points if p not in points_to_remove_set
-            ]
-
-
-            # self.background_points = [
-            #     p for p in self.background_points if p not in points_to_remove
-            # ]
-
-            t3 = time.perf_counter()
-
-            
-            for p in points_to_remove:
-                # Remove from z_view_dict
-                if p[2] in self.z_view_dict:
-                    self.z_view_dict[p[2]] = [
-                        z_point for z_point in self.z_view_dict[p[2]] 
-                        if z_point[0] != p[0] or z_point[1] != p[1] or z_point[2] != p[3] or z_point[3] != p[4]
-                    ]
-                    if not self.z_view_dict[p[2]]:
-                        del self.z_view_dict[p[2]]
-
-                # Remove from y_view_dict
-                if p[1] in self.y_view_dict:
-                    self.y_view_dict[p[1]] = [
-                        y_point for y_point in self.y_view_dict[p[1]] 
-                        if y_point[1] != p[0] or y_point[0] != p[2] or y_point[2] != p[3] or y_point[3] != p[4]
-                    ]
-                    if not self.y_view_dict[p[1]]:
-                        del self.y_view_dict[p[1]]
-
-                # Remove from x_view_dict
-                if p[0] in self.x_view_dict:
-                    self.x_view_dict[p[0]] = [
-                        x_point for x_point in self.x_view_dict[p[0]] 
-                        if x_point[1] != p[1] or x_point[0] != p[2] or x_point[2] != p[3] or x_point[3] != p[4]
-                    ]
-                    if not self.x_view_dict[p[0]]:
-                        del self.x_view_dict[p[0]]
-
-            # remove from pure coordinates
-            self.pure_coordinates = [p for p in self.pure_coordinates if p not in pure_points_to_remove]
-            t4 = time.perf_counter()
-
-            total_time = t4 - t0
-            first_time = (t1 - t0) / total_time
-            second_time = (t2 - t1) / total_time
-            third_time = (t3 - t2) / total_time
-            fourth_time = (t4 - t3) / total_time
-            print(f"First: {first_time}, Second: {second_time}, Third: {third_time}, Fourth: {fourth_time}")
-
-
-    def check_overlaps(self, points, suspicious_size = 11):
-        new_labels = {}
-        new_label_idx = 1
-        cell_dict = {}
-        for point in points:
-            if point[-2] not in cell_dict:
-                cell_dict[point[-2]] = []
-            cell_dict[point[-2]].append(point)
-        for cell in cell_dict.values():
-            point_locs = cell[:3]
-            minimum_locs = np.min(point_locs, axis = 0)
-            maximum_locs = np.max(point_locs, axis = 0)
-            diff = maximum_locs - minimum_locs
-
-            if (diff > suspicious_size).sum() > 0:
-                cube_shape = diff + [3, 3, 3]
-                cube = np.zeros(cube_shape)
-                shifted_locs = point_locs + 1  # Shift locs to account for padding
-                cube[shifted_locs[:, 0], shifted_locs[:, 1], shifted_locs[:, 2]] = 1
-                labeled_cube, num_feats = label(cube)
-                if num_feats > 1:
-                    objects = find_objects(labeled_cube)  
-                    for ii in range(num_feats):
-                        if objects[ii] is not None:  
-                            obj_slice = objects[ii]
-                            cube_locs = np.argwhere(labeled_cube[obj_slice] == ii + 1)
-                            cube_locs = cube_locs + np.array([s.start for s in obj_slice]) + minimum_locs - 1
-                            if new_label_idx not in new_labels:
-                                new_labels[new_label_idx] = []
-                            new_labels[new_label_idx].append(cube_locs)
-                            new_label_idx += 1
+                # Handle both single point and list of points
+                if not isinstance(point, list) or len(point) == 5:
+                    # Single point case
+                    points_array = np.array([point])
+                    z_plane_array = self.z_view_dict.get(point[2])
                 else:
-                    if new_label_idx not in new_labels:
-                        new_labels[new_label_idx] = []
-                    new_labels[new_label_idx].append(point_locs)
-                    new_label_idx += 1
-            else:
-                if new_label_idx not in new_labels:
-                    new_labels[new_label_idx] = []
-                new_labels[new_label_idx].append(point_locs)
-                new_label_idx += 1
+                    # Multiple points case
+                    points_array = np.array(point)
+                    z_plane_array = self.z_view_dict.get(points_array[0, 2])
+                
+                if z_plane_array is None:
+                    return
+                radius = self.eraser_radius
 
+                # Extract coordinates and target label (assuming all points have same target_label)
+                eraser_x = points_array[:, 0]
+                eraser_y = points_array[:, 1]
+                target_label = points_array[0, 4]  # All points should have same target_label
 
+                # Extract coordinates and labels from z_plane_array
+                points_x = z_plane_array[:, 0]
+                points_y = z_plane_array[:, 1]
+                points_labels = z_plane_array[:, 3]
 
-        points_wo_index = [tuple(point[:-1]) for point in points]
-        indices_to_remove = []
-        for idx, point in enumerate(points):
-            current_points_wo_index = points_wo_index[:idx] + points_wo_index[idx+1:]
-            if tuple(point[:-1]) in current_points_wo_index:
-                indices_to_remove.append(idx)
-        if indices_to_remove:
-            overlapnum = str(len(indices_to_remove))
-            mbox = QMessageBox.question(self, 'Warning: {} Points overlap'.format(overlapnum), 
-                                        "Some points overlap. Do you want to remove them?", 
-                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if mbox == QMessageBox.Yes:
-                return [points[idx] for idx in range(len(points)) if idx not in indices_to_remove]
+                # Vectorized conditions - check if any eraser point is within radius
+                label_match = points_labels == target_label
+
+                # For each point in z_plane_array, check if it's within radius of ANY eraser point
+                # Using broadcasting: (n_z_points, 1) vs (1, n_eraser_points)
+                x_diffs = np.abs(points_x[:, np.newaxis] - eraser_x[np.newaxis, :])
+                y_diffs = np.abs(points_y[:, np.newaxis] - eraser_y[np.newaxis, :])
+                distances = np.sqrt(x_diffs**2 + y_diffs**2)
+
+                # Check if within radius for any eraser point
+                x_within_radius = np.any(x_diffs <= radius, axis=1)
+                y_within_radius = np.any(y_diffs <= radius, axis=1)
+                distance_within_radius = np.any(distances <= radius, axis=1)
+
+                # Combine all conditions
+                mask = label_match & x_within_radius & y_within_radius & distance_within_radius
+
+                # Build points_to_remove as numpy array using vectorized indexing
+                if np.any(mask):
+                    selected_points = z_plane_array[mask]
+                    # For multiple eraser points, we use the first point's index (point[2]) 
+                    # as they should all have the same z-coordinate/index
+                    point_z_index = points_array[0, 2]
+                    points_to_remove = np.column_stack([
+                        selected_points[:, 0],  # p[0] - x coordinate
+                        selected_points[:, 1],  # p[1] - y coordinate
+                        np.full(len(selected_points), point_z_index),  # point[2] - z index
+                        selected_points[:, 2],  # p[2] - original third column
+                        selected_points[:, 3]   # p[3] - label
+                    ])
+                else:
+                    points_to_remove = []
+            elif view_plane == "XZ":
+                # Handle both single point and list of points
+                if not isinstance(point, list) or len(point) == 5:
+                    # Single point case
+                    points_array = np.array([point])
+                    y_plane_array = self.y_view_dict.get(point[1])
+                else:
+                    # Multiple points case
+                    points_array = np.array(point)
+                    y_plane_array = self.y_view_dict.get(points_array[0, 1])
+                if y_plane_array is None:
+                    return
+                radius = self.eraser_radius
+
+                # Extract coordinates and target label (assuming all points have same target_label)
+                eraser_x = points_array[:, 0]
+                eraser_y = points_array[:, 2]
+                target_label = points_array[0, 4]  # All points should have same target_label
+                
+                # Extract coordinates and labels from z_plane_array
+                points_x = y_plane_array[:, 0]
+                points_y = y_plane_array[:, 1]
+                points_labels = y_plane_array[:, 3]
+
+                # Vectorized conditions - check if any eraser point is within radius
+                label_match = points_labels == target_label
+
+                # For each point in y_plane_array, check if it's within radius of ANY eraser point
+                # Using broadcasting: (n_y_points, 1) vs (1, n_eraser_points)
+                x_diffs = np.abs(points_x[:, np.newaxis] - eraser_x[np.newaxis, :])
+                y_diffs = np.abs(points_y[:, np.newaxis] - eraser_y[np.newaxis, :])
+                distances = np.sqrt(x_diffs**2 + y_diffs**2)
+
+                # Check if within radius for any eraser point
+                x_within_radius = np.any(x_diffs <= radius, axis=1)
+                y_within_radius = np.any(y_diffs <= radius, axis=1)
+                distance_within_radius = np.any(distances <= radius, axis=1)
+
+                # Combine all conditions
+                mask = label_match & x_within_radius & y_within_radius & distance_within_radius
+
+                # Build points_to_remove as numpy array using vectorized indexing
+                if np.any(mask):
+                    selected_points = y_plane_array[mask]
+                    # For multiple eraser points, we use the first point's index (point[2]) 
+                    # as they should all have the same z-coordinate/index
+                    point_y_index = points_array[0, 1]
+                    points_to_remove = np.column_stack([
+                        selected_points[:, 0],  # p[0] - x coordinate
+                        np.full(len(selected_points), point_y_index),
+                        selected_points[:, 1],  # p[1] - y coordinate
+                        selected_points[:, 2],  # p[2] - original third column
+                        selected_points[:, 3]   # p[3] - label
+                    ])
+                else:
+                    points_to_remove = []
+            elif view_plane == "YZ":
+                # Handle both single point and list of points
+                if not isinstance(point, list) or len(point) == 5:
+                    # Single point case
+                    points_array = np.array([point])
+                    x_plane_array = self.x_view_dict.get(point[0])
+                else:
+                    # Multiple points case
+                    points_array = np.array(point)
+                    x_plane_array = self.x_view_dict.get(points_array[0, 0])
+                if x_plane_array is None:
+                    return
+                radius = self.eraser_radius
+                if x_plane_array is None:
+                    return
+                
+                # Extract coordinates and target label (assuming all points have same target_label)
+                eraser_x = points_array[:, 2]
+                eraser_y = points_array[:, 1]
+                target_label = points_array[0, 4]  # All points should have same target_label
+
+                # Extract coordinates and labels from x_plane_array
+                points_x = x_plane_array[:, 0]
+                points_y = x_plane_array[:, 1]
+                points_labels = x_plane_array[:, 3]
+
+                # Vectorized conditions - check if any eraser point is within radius
+                label_match = points_labels == target_label
+
+                # For each point in y_plane_array, check if it's within radius of ANY eraser point
+                # Using broadcasting: (n_y_points, 1) vs (1, n_eraser_points)
+                x_diffs = np.abs(points_x[:, np.newaxis] - eraser_x[np.newaxis, :])
+                y_diffs = np.abs(points_y[:, np.newaxis] - eraser_y[np.newaxis, :])
+                distances = np.sqrt(x_diffs**2 + y_diffs**2)
+
+                # Check if within radius for any eraser point
+                x_within_radius = np.any(x_diffs <= radius, axis=1)
+                y_within_radius = np.any(y_diffs <= radius, axis=1)
+                distance_within_radius = np.any(distances <= radius, axis=1)
+
+                # Combine all conditions
+                mask = label_match & x_within_radius & y_within_radius & distance_within_radius
+
+                # Build points_to_remove as numpy array using vectorized indexing
+                if np.any(mask):
+                    selected_points = x_plane_array[mask]
+                    # For multiple eraser points, we use the first point's index (point[2]) 
+                    # as they should all have the same z-coordinate/index
+                    point_x_index = points_array[0, 0]
+                    points_to_remove = np.column_stack([
+                        np.full(len(selected_points), point_x_index),
+                        selected_points[:, 0],  # p[0] - x coordinate
+                        selected_points[:, 1],  # p[1] - y coordinate
+                        selected_points[:, 2],  # p[2] - original third column
+                        selected_points[:, 3]   # p[3] - label
+                    ])
+                else:
+                    points_to_remove = []
             else:
-                return points
-        else:
-            return points
-    
-    def saveMasks(self):
-        mask = np.zeros_like(self.image_data, dtype=int) 
-        mbox = QMessageBox.question(self, 'Overlaps', "Do you want to check for overlaps and disconnected labels? (recommended)", 
-                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if mbox == QMessageBox.Yes:
-            points = self.check_overlaps(self.foreground_points)
-            QMessageBox.about(self, "Overlaps checked", "Overlaps checked")
-        points = self.foreground_points
-        for point in self.background_points:
-            x, y, z = point
-            if 0 <= z < mask.shape[0] and 0 <= y < mask.shape[1] and 0 <= x < mask.shape[2]:
-                mask[z, y, x] = 0
-        for point in points:
-            x, y, z, idx, color_idx = point
-            if 0 <= z < mask.shape[0] and 0 <= y < mask.shape[1] and 0 <= x < mask.shape[2]:
-                mask[z, y, x] = idx
-        filenameNew = self.filename.replace(".", "")
-        mask_name = filenameNew + "_mask.npy"
-        if os.path.isfile(mask_name):
-            mbox = QMessageBox.question(self, 'Warning: Masks file exists', "Do you want to overwrite it?", 
-                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if mbox == QMessageBox.Yes:
-                np.save(mask_name, mask)
-                QMessageBox.about(self, "Masks saved", "Masks saved as %s" % (mask_name))
-            else:
-                QMessageBox.about(self, "Saving aborted", "Masks not saved")
-        else:
-            np.save(mask_name, mask)
-            QMessageBox.about(self, "Masks saved", "Masks saved as %s" % (mask_name))
+                return
+            
+            if len(points_to_remove) == 0:
+                return
+            
+
+            temp_z_view_removal_dict = {}
+            temp_y_view_removal_dict = {}
+            temp_x_view_removal_dict = {}
+            for p in points_to_remove:                   
+                if p[2] not in temp_z_view_removal_dict:
+                    temp_z_view_removal_dict[p[2]] = []
+                if p[1] not in temp_y_view_removal_dict:
+                    temp_y_view_removal_dict[p[1]] = []
+                if p[0] not in temp_x_view_removal_dict:
+                    temp_x_view_removal_dict[p[0]] = []
+                temp_z_view_removal_dict[p[2]].append((p[0], p[1], p[3], p[4]))
+                temp_y_view_removal_dict[p[1]].append((p[0], p[2], p[3], p[4]))
+                temp_x_view_removal_dict[p[0]].append((p[2], p[1], p[3], p[4]))
+            temp_z_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_z_view_removal_dict.items()}
+            temp_y_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_removal_dict.items()}
+            temp_x_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_removal_dict.items()}
+            
+            self.remove_pts_slice_view_dicts(temp_z_view_removal_dict, temp_y_view_removal_dict, temp_x_view_removal_dict)
         
     def load_masks(self, filename, load_background = False):
         # Show the loading screen
         self.loading_screen = LoadingScreen()
         self.loading_screen.show()
-
         # Create and start the worker thread
         self.mask_loader = MaskLoader(self, filename, load_background)
         self.mask_loader.error_signal.connect(self.show_error)
@@ -1320,39 +1323,68 @@ class MainWindow(QMainWindow):
         answer_bool = (answer == QMessageBox.Yes)
         self.label_shift_answer.emit(answer_bool)
 
+    def add_pts_slice_view_dicts(self, temp_z_view_dict, temp_y_view_dict, temp_x_view_dict):
+        for k, v in temp_z_view_dict.items():
+            np_z_pts = self.z_view_dict.get(k)
+            if np_z_pts is not None:
+                coors_present = np_z_pts[:, :2]
+                v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
+                coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
+                occupied_mask = ~np.isin(v_rows, coors_rows)
+                v = v[occupied_mask]
+                if v.size == 0:
+                    continue
+                self.z_view_dict[k] = np.append(np_z_pts, v, axis=0)
+            else:
+                self.z_view_dict[k] = v
+        for k, v in temp_y_view_dict.items():
+            np_y_pts = self.y_view_dict.get(k)
+            if np_y_pts is not None:
+                coors_present = np_y_pts[:, :2]
+                v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
+                coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
+                occupied_mask = ~np.isin(v_rows, coors_rows)
+                v = v[occupied_mask]
+                if v.size == 0:
+                    continue
+                self.y_view_dict[k] = np.append(np_y_pts, v, axis=0)
+            else:
+                self.y_view_dict[k] = v
+        for k, v in temp_x_view_dict.items():
+            np_x_pts = self.x_view_dict.get(k)
+            if np_x_pts is not None:
+                coors_present = np_x_pts[:, :2]
+                v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
+                coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
+                occupied_mask = ~np.isin(v_rows, coors_rows)
+                v = v[occupied_mask]
+                if v.size == 0:
+                    continue
+                self.x_view_dict[k] = np.append(np_x_pts, v, axis=0)
+            else:
+                self.x_view_dict[k] = v
+
     def add_points(self, point):
         if not isinstance(point, list):
             point = [point]
-        for p in point:
-            self.pure_coordinates.append(p[:3])                        
+        temp_z_view_dict = {}
+        temp_y_view_dict = {}
+        temp_x_view_dict = {}
+        for p in point:                   
             self.foreground_points.append(p)
-            if p[2] not in self.z_view_dict:
-                self.z_view_dict[p[2]] = []
-            if p[1] not in self.y_view_dict:
-                self.y_view_dict[p[1]] = []
-            if p[0] not in self.x_view_dict:
-                self.x_view_dict[p[0]] = []
-            self.z_view_dict[p[2]].append((p[0], p[1], p[3], p[4]))
-            self.y_view_dict[p[1]].append((p[2], p[0], p[3], p[4]))
-            self.x_view_dict[p[0]].append((p[2], p[1], p[3], p[4]))
-
-    def update_masks(self, action_type, points):
-        if action_type == "add":
-            self.addPoints(points, "XY")
-            self.addPoints(points, "XZ")
-            self.addPoints(points, "YZ")
-        elif action_type == "remove":
-            self.removePoints(points, "XY")
-            self.removePoints(points, "XZ")
-            self.removePoints(points, "YZ")
-        elif action_type == "merge":
-            self.mergePoints(points, "XY")
-            self.mergePoints(points, "XZ")
-            self.mergePoints(points, "YZ")
-        elif action_type == "split":
-            self.splitPoints(points, "XY")
-            self.splitPoints(points, "XZ")
-            self.splitPoints(points, "YZ")
+            if p[2] not in temp_z_view_dict:
+                temp_z_view_dict[p[2]] = []
+            if p[1] not in temp_y_view_dict:
+                temp_y_view_dict[p[1]] = []
+            if p[0] not in temp_x_view_dict:
+                temp_x_view_dict[p[0]] = []
+            temp_z_view_dict[p[2]].append((p[0], p[1], p[3], p[4]))
+            temp_y_view_dict[p[1]].append((p[0], p[2], p[3], p[4]))
+            temp_x_view_dict[p[0]].append((p[2], p[1], p[3], p[4]))
+        temp_z_view_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_z_view_dict.items()}
+        temp_y_view_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_dict.items()}
+        temp_x_view_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_dict.items()}
+        self.add_pts_slice_view_dicts(temp_z_view_dict, temp_y_view_dict, temp_x_view_dict)
 
     def on_masks_loaded(self):
         self.loading_screen.hide()
@@ -1415,41 +1447,26 @@ class MainWindow(QMainWindow):
                     points_to_paint = []
                     xy = relevant_points[:, :2]
                     label_indices = relevant_points[:, -1]
+                    if self.alpha_label_index is not None:
+                        mask_for_contour_finding = np.where(label_indices == self.alpha_label_index)[0]
+                        pts_relevant = xy[mask_for_contour_finding]
+                        if pts_relevant.shape[0] > 0:
+                            max_box = np.max(pts_relevant, axis=0)
+                            min_box = np.min(pts_relevant, axis=0)
                     colors = glasbey_cmap_rgb[label_indices]  
                     points_to_paint = np.hstack((xy, colors))
-                    gray_rgb = np.stack([image]*3, axis=-1)  # shape (H, W, 3)
+                    gray_rgb = np.stack([image]*3, axis=-1)  
                     gray_rgb[points_to_paint[:, 1], points_to_paint[:, 0]] = points_to_paint[:, 2:]
-                    #self.xy_view.setPixmap(QPixmap.fromImage(QImage(gray_rgb, gray_rgb.shape[1], gray_rgb.shape[0], QImage.Format_RGB888)))
-
-                    # total_time = t2-t0
-                    # first_time = (t1-t0)/total_time
-                    # second_time = (t2-t1)/total_time
-                    # print("first_time", first_time)
-                    # print("second_time", second_time)
-                    # print("total_time", total_time)
-
-                    #points_to_paint = generate_points_array(relevant_points, glasbey_cmap_rgb)
-                    # for point in relevant_points:
-                    #     points_to_paint.append((point[0], point[1], glasbey_cmap_rgb[point[-1]]))
-                    #t3 = time.perf_counter()
-                    # gray_rgb = np.stack([image]*3, axis=-1)
-                    # for x, y, rgb in points_to_paint:
-                    #     gray_rgb[y, x] = rgb  # Note: NumPy is (row=y, col=x)
-                    #t4 = time.perf_counter()
-                    # gray_rgb = np.stack([image]*3, axis=-1)  # shape (H, W, 3)
-                    # xy = points_to_paint[:, :2].astype(int)     # shape (N, 2)
-                    # colors = points_to_paint[:, 2:].astype(gray_rgb.dtype)  # shape (N, 3)
-                    # gray_rgb[xy[:,1], xy[:,0]] = colors
-                    #t1 = time.perf_counter()
                     pixmap = self.numpyArrayToPixmap(gray_rgb)
-                    #t2 = time.perf_counter()
-
-                    # t5 = time.perf_counter()
                 else:
-                    # t1 = time.perf_counter()
-                    # t2 = time.perf_counter()
                     pixmap = self.numpyArrayToPixmap(image)
-
+                if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
+                    circle_painter = QPainter(pixmap)
+                    pen = QPen(QColor(255, 0, 0, 80))
+                    pen.setWidth(1)
+                    circle_painter.setPen(pen)
+                    circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                    circle_painter.end()
                 if self.view_finder:
                     self.xy_painter = QPainter(pixmap)
                     pen = QPen(QColor(255, 255, 0, 80))
@@ -1464,69 +1481,9 @@ class MainWindow(QMainWindow):
                     self.xy_painter.drawLine(x_val, 0, x_val, pixmap.height())
                     self.xy_painter.drawLine(0, y_val, pixmap.width(), y_val)
                     self.xy_painter.end()
-
             else:
                 pixmap = self.numpyArrayToPixmap(image)
-
-            # pixmap = self.numpyArrayToPixmap(image)
-            # t1 = time.perf_counter()
-            # if self.markers_enabled:
-            #     self.xy_painter = QPainter(pixmap)
-            #     if self.foreground_points:
-            #         color_idx = 0
-            #         color_count = 0
-            #         # pen = QPen(QColor(glasbey_cmap[color_idx]))
-            #         # pen.setWidth(1)
-            #         # self.xy_painter.setPen(pen)
-            #         t2 = time.perf_counter()
-            #         relevant_points = self.z_view_dict.get(z_index)
-            #         t3 = time.perf_counter()
-
-            #         # h, w = image.shape[:2]
-            #         # #canvas = np.zeros((h, w, 4), dtype=np.uint8)  # RGBA
-            #         # canvas = np.repeat(np.expand_dims(image, -1), 4, axis=-1).astype(np.uint8)
-            #         # for p in relevant_points:
-            #         #     x, y, class_id = p[0], p[1], p[-1]
-            #         #     color = glasbey_cmap_rgb[class_id]
-            #         #     canvas[y, x] = [*color[:3], 255]  # Set pixel
-
-            #         # qimage = QImage(canvas.data, w, h, QImage.Format_RGBA8888)
-            #         # pixmap = QPixmap.fromImage(qimage)
-            #         if relevant_points:
-            #             for point in relevant_points:
-            #                 if point[-1] != color_idx:
-            #                     color_idx = point[-1]
-            #                     color_count += 1
-            #                     pen = QPen(QColor(glasbey_cmap[color_idx]))
-            #                     pen.setWidth(1)
-            #                     self.xy_painter.setPen(pen)
-            #                 self.xy_painter.drawPoint(point[0], point[1])
-            #         # t4 = time.perf_counter()
-
-            #         # total_time = t4 - t0
-            #         # first_time_fraction = (t1 - t0) / total_time
-            #         # second_time_fraction = (t2 - t1) / total_time
-            #         # third_time_fraction = (t3 - t2) / total_time
-            #         # fourth_time_fraction = (t4 - t3) / total_time
-            #         # print("first_time_fraction", first_time_fraction)
-            #         # print("second_time_fraction", second_time_fraction)
-            #         # print("third_time_fraction", third_time_fraction)
-            #         # print("fourth_time_fraction", fourth_time_fraction)
-            #         # print("total_time", total_time)
-
-                
-
             self.xy_view.setPixmap(pixmap)
-            # t3 = time.perf_counter()
-            # total_time = t3 - t0
-            # first_time_fraction = (t1 - t0) / total_time
-            # second_time_fraction = (t2 - t1) / total_time
-            # third_time_fraction = (t3 - t2) / total_time
-            # print("first_time_fraction", first_time_fraction)
-            # print("second_time_fraction", second_time_fraction)
-            # print("third_time_fraction", third_time_fraction)
-            # print("total_time", total_time)
-            
 
     def slider_to_pixmap(self, slider_value, slider_min, slider_max, pixmap_min, pixmap_max):
         return int((slider_value - slider_min) / (slider_max - slider_min) * (pixmap_max - pixmap_min) + pixmap_min)
@@ -1554,8 +1511,6 @@ class MainWindow(QMainWindow):
         if self.image_data is not None:
             y_index = self.slidery.value()
             image = self.get_flat_image_view("XZ", y_index)
-            #pixmap = self.numpyArrayToPixmap(image)
-
             if self.markers_enabled:
                 relevant_points = self.y_view_dict.get(y_index)
                 if relevant_points is not None:
@@ -1566,57 +1521,22 @@ class MainWindow(QMainWindow):
                     points_to_paint = np.hstack((xz, colors))
                     gray_rgb = np.stack([image]*3, axis=-1)  # shape (H, W, 3)
                     gray_rgb[points_to_paint[:, 1], points_to_paint[:, 0]] = points_to_paint[:, 2:]
-
-                    
-
                     pixmap = self.numpyArrayToPixmap(gray_rgb)
-
-                    
-
-                    # if self.view_finder:
-                    #     painter = QPainter(pixmap)
-                    #     pen = QPen(QColor(255, 255, 0, 80))
-                    #     pen.setWidth(1)
-                    #     painter.setPen(pen)
-                    #     y_val = self.slider_to_pixmap(self.slidery.value(), 0, self.y_max, 0, pixmap.height())
-                    #     x_val = self.slider_to_pixmap(self.sliderx.value(), 0, self.x_max, 0, pixmap.width())
-                    #     square_size = 30 
-                    #     top_left_x = x_val - square_size // 2
-                    #     top_left_y = y_val - square_size // 2
-                    #     painter.drawEllipse(top_left_x, top_left_y, square_size, square_size)
-                    #     painter.drawLine(x_val, 0, x_val, pixmap.height())
-                    #     painter.drawLine(0, y_val, pixmap.width(), y_val)
-
-                    #     painter.end()
-
-                    
-
-                #painter = QPainter(pixmap)
-                # if self.foreground_points:
-                #     color_idx = 0
-                #     color_count = 0
-                #     pen = QPen(QColor(glasbey_cmap[color_idx]))
-                #     pen.setWidth(1)
-                #     painter.setPen(pen)
-                #     #relevant_points = [point for point in self.foreground_points if point[1] == y_index]
-                #     relevant_points = self.y_view_dict.get(y_index)
-                #     if relevant_points is not None:
-                #         for point in relevant_points:
-                #             if point[-1] != color_idx:
-                #                 color_idx = point[-1]
-                #                 color_count += 1
-                #                 pen = QPen(QColor(glasbey_cmap[color_idx]))
-                #                 pen.setWidth(1)
-                #                 painter.setPen(pen)
-                #             painter.drawPoint(point[0], point[1])
-
-
-                # pen = QPen(Qt.blue)
-                # pen.setWidth(1)
-                # painter.setPen(pen)
+                    if self.alpha_label_index is not None:
+                        mask_for_contour_finding = np.where(label_indices == self.alpha_label_index)[0]
+                        pts_relevant = xz[mask_for_contour_finding]
+                        if pts_relevant.shape[0] > 0:
+                            max_box = np.max(pts_relevant, axis=0)
+                            min_box = np.min(pts_relevant, axis=0)
                 else:
                     pixmap = self.numpyArrayToPixmap(image)
-
+                if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
+                    circle_painter = QPainter(pixmap)
+                    pen = QPen(QColor(255, 0, 0, 80))
+                    pen.setWidth(1)
+                    circle_painter.setPen(pen)
+                    circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                    circle_painter.end()
                 if self.view_finder:
                     painter = QPainter(pixmap)
                     pixmapx = self.slider_to_pixmap(self.slider.value(), 0, self.z_max, 0, pixmap.width())
@@ -1626,12 +1546,9 @@ class MainWindow(QMainWindow):
                     painter.setPen(pen)
                     painter.drawLine(pixmapx, 0, pixmapx, pixmap.height())
                     painter.drawLine(0, pixmapy, pixmap.width(), pixmapy)
-
                     painter.end()
-
             else:
                 pixmap = self.numpyArrayToPixmap(image)
-
             self.xz_view.setPixmap(pixmap)
 
     def update_yz_view(self):
@@ -1645,36 +1562,26 @@ class MainWindow(QMainWindow):
                     points_to_paint = []
                     yz = relevant_points[:, :2]
                     label_indices = relevant_points[:, -1]
-                    colors = glasbey_cmap_rgb[label_indices]  
+                    colors = glasbey_cmap_rgb[label_indices]
                     points_to_paint = np.hstack((yz, colors))
-                    gray_rgb = np.stack([image]*3, axis=-1)  # shape (H, W, 3)
+                    gray_rgb = np.stack([image]*3, axis=-1)
                     gray_rgb[points_to_paint[:, 1], points_to_paint[:, 0]] = points_to_paint[:, 2:]
                     pixmap = self.numpyArrayToPixmap(gray_rgb)
+                    if self.alpha_label_index is not None:
+                        mask_for_contour_finding = np.where(label_indices == self.alpha_label_index)[0]
+                        pts_relevant = yz[mask_for_contour_finding]
+                        if pts_relevant.shape[0] > 0:
+                            max_box = np.max(pts_relevant, axis=0)
+                            min_box = np.min(pts_relevant, axis=0)
                 else:
                     pixmap = self.numpyArrayToPixmap(image)
-                # painter = QPainter(pixmap)
-                # if self.foreground_points:
-                #     color_idx = 0
-                #     color_count = 0
-                #     pen = QPen(QColor(glasbey_cmap[color_idx]))
-                #     pen.setWidth(1)
-                #     painter.setPen(pen)
-                #     #relevant_points = [point for point in self.foreground_points if point[0] == x_index]
-                #     relevant_points = self.x_view_dict.get(x_index)
-                #     if relevant_points is not None:
-                #         for point in relevant_points:
-                #             if point[-1] != color_idx:
-                #                 color_idx = point[-1]
-                #                 color_count += 1
-                #                 pen = QPen(QColor(glasbey_cmap[color_idx]))
-                #                 pen.setWidth(1)
-                #                 painter.setPen(pen)
-                #             painter.drawPoint(point[0], point[1])
-
-                # pen = QPen(Qt.blue)
-                # pen.setWidth(1)
-                # painter.setPen(pen)
-
+                if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
+                    circle_painter = QPainter(pixmap)
+                    pen = QPen(QColor(255, 0, 0, 80))
+                    pen.setWidth(1)
+                    circle_painter.setPen(pen)
+                    circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                    circle_painter.end()
                 if self.view_finder:    
                     painter = QPainter(pixmap)
                     pixmapy = self.slider_to_pixmap(self.slidery.value(), 0, self.y_max, 0, pixmap.height())
@@ -1684,19 +1591,16 @@ class MainWindow(QMainWindow):
                     painter.setPen(pen)
                     painter.drawLine(pixmapx, 0, pixmapx, pixmap.height())
                     painter.drawLine(0, pixmapy, pixmap.width(), pixmapy)
-
                     painter.end()
-
             else:
                 pixmap = self.numpyArrayToPixmap(image)
-
             self.yz_view.setPixmap(pixmap)
 
 def main():
     app = QApplication(sys.argv)
     window = MainWindow()
     window.setGeometry(100, 100, 800, 800)
-    window.setWindowTitle(f'3D TIFF Viewer')
+    window.setWindowTitle(f'3D Image Stack Editor and Viewer')
     window.show()
     sys.exit(app.exec_())
 

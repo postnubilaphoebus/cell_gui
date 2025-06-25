@@ -40,7 +40,7 @@ class GraphicsView(QGraphicsView):
         self.rotate(angle)
 
     def focusInEvent(self, event):
-        self.setStyleSheet("border: 2px solid lightgreen;")
+        self.setStyleSheet("border: 1px solid lightgreen;")
         super().focusInEvent(event)
 
     def focusOutEvent(self, event):
@@ -137,17 +137,17 @@ class GraphicsView(QGraphicsView):
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
             z_index = self.main_window.slider.value()
-            return np.array([lp.x(), lp.y(), z_index])#(lp.x(), lp.y(), z_index)
+            return np.array([lp.x(), lp.y(), z_index])
         elif view_plane == "XZ":
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
             y_index = self.main_window.slidery.value()
-            return np.array([lp.x(), y_index, lp.y()])#(lp.y(), y_index, lp.x())
+            return np.array([lp.x(), y_index, lp.y()])
         elif view_plane == "YZ":
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
             x_index = self.main_window.sliderx.value()
-            return np.array([x_index, lp.y(), lp.x()])#(x_index, lp.y(), lp.x())
+            return np.array([x_index, lp.y(), lp.x()])
         else:
             raise ValueError("Invalid viewplane.\
                              Choose among 'XY', 'XZ', 'YZ'")
@@ -201,10 +201,8 @@ class GraphicsView(QGraphicsView):
             return min_v <= v <= max_v
 
         def add_point(i, j, k):
-            if self.main_window.foreground_enabled:
-                points.append((i, j, k, main_index, color_index))
-            else:
-                points.append((i, j, k))
+            #if self.main_window.foreground_enabled:
+            points.append((i, j, k, main_index, color_index))
 
         dim1, dim2 = dimension_ranges[fixed_dimension]
         min1, max1, min2, max2 = bounds[fixed_dimension]
@@ -248,10 +246,25 @@ class GraphicsView(QGraphicsView):
                              QMessageBox.No)
                     if mbox == QMessageBox.Yes:
                         cell_idx = None
-                        for p in self.main_window.foreground_points:
-                            if tuple(p[:3]) == point:
-                                cell_idx = p[3]
-                                break
+                        point = np.expand_dims(point, 0)
+                        if self.view_plane == "XY":
+                            z_index = self.main_window.slider.value()
+                            view_points = self.main_window.z_view_dict.get(z_index)
+                        elif self.view_plane == "XZ":
+                            y_index = self.main_window.slidery.value()
+                            view_points = self.main_window.y_view_dict.get(y_index)
+                            point = point[:, [0, 2, 1]]
+                        elif self.view_plane == "YZ":
+                            x_index = self.main_window.sliderx.value()
+                            view_points = self.main_window.x_view_dict.get(x_index)
+                            point = point[:, [2, 1, 0]]
+                        if view_points is not None:
+                            point = point[:, :2]
+                            matches = np.all(view_points[:, :2] == point, axis=1)
+                            match_indices = np.where(matches)[0]
+                            if match_indices.size > 0:
+                                found_point = view_points[match_indices]
+                                cell_idx = found_point[0][2]
                         indices_to_remove = []
                         for i, p in enumerate(self.main_window.foreground_points):
                             if p[3] == cell_idx:
@@ -266,16 +279,34 @@ class GraphicsView(QGraphicsView):
                 and self.main_window.markers_enabled:
                 pixmap_item = self._pixmap_item
                 point = self.obtain_current_point(pixmap_item, event, self.view_plane)
-                if point:
+                if point.size > 0:
                     cell_idx = None
-                    for p in self.main_window.foreground_points:
-                        if tuple(p[:3]) == point:
-                            cell_idx = p[3]
-                            break
+                    point = np.expand_dims(point, 0)
+                    if self.view_plane == "XY":
+                        z_index = self.main_window.slider.value()
+                        view_points = self.main_window.z_view_dict.get(z_index)
+                    elif self.view_plane == "XZ":
+                        y_index = self.main_window.slidery.value()
+                        view_points = self.main_window.y_view_dict.get(y_index)
+                        point = point[:, [0, 2, 1]]
+                    elif self.view_plane == "YZ":
+                        x_index = self.main_window.sliderx.value()
+                        view_points = self.main_window.x_view_dict.get(x_index)
+                        point = point[:, [2, 1, 0]]
+                    if view_points is not None:
+                        point = point[:, :2]
+                        matches = np.all(view_points[:, :2] == point, axis=1)
+                        match_indices = np.where(matches)[0]
+                        if match_indices.size > 0:
+                            found_point = view_points[match_indices]
+                            cell_idx = found_point[0][2]
+                    else:
+                        return
                     if cell_idx:
                         self.main_window.new_cell_selected = True
                         self.main_window.index_control.cell_index = cell_idx
                         self.main_window.update_index_display()
+                        self.main_window.alpha_label_index = cell_idx
                         self.main_window.index_control.update_index(self.main_window.index_control.cell_index, 
                                                                     self.main_window.current_highest_cell_index)
                         self.main_window.update_xy_view()
@@ -286,19 +317,20 @@ class GraphicsView(QGraphicsView):
                 if self.main_window.drawing and self.main_window.markers_enabled:
                     pixmap_item = self._pixmap_item
                     points = self.obtain_current_point(pixmap_item, event, self.view_plane)
-
                     if self.main_window.foreground_enabled:
                         if self.main_window.brush_width == 1:
-                            if points not in self.main_window.pure_coordinates:
-                                points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
-                                self.main_window.add_points(points)
+                            points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
+                            self.main_window.add_points(points)
                         elif self.main_window.brush_width > 1:
                             ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
-                            relevant_points = [pp for pp in ppoints if pp[:3] not in self.main_window.pure_coordinates]
-                            self.main_window.add_points(relevant_points)
+                            self.main_window.add_points(ppoints)
                     elif self.main_window.eraser_enabled:
-                        points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
-                        self.main_window.removePoints(points, self.view_plane)
+                        if self.main_window.eraser_radius == 1:
+                            points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
+                            self.main_window.removePoints(points, self.view_plane)
+                        else:
+                            ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.eraser_radius - 1)
+                            self.main_window.removePoints(ppoints, self.view_plane)
                     self.main_window.update_xy_view()
                     self.main_window.update_xz_view()
                     self.main_window.update_yz_view()
@@ -337,7 +369,6 @@ class GraphicsView(QGraphicsView):
         event.accept()
 
     def mouseMoveEvent(self, event):
-
         if self.main_window.drawing and self.main_window.dragging and self.main_window.markers_enabled:
             pixmap_item = self._pixmap_item
             points = self.obtain_current_point(pixmap_item, event, self.view_plane)
@@ -348,8 +379,7 @@ class GraphicsView(QGraphicsView):
                         self.main_window.add_points(points)
                 elif self.main_window.brush_width > 1:
                     ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
-                    relevant_points = [pp for pp in ppoints if pp[:3] not in self.main_window.pure_coordinates]
-                    self.main_window.add_points(relevant_points)
+                    self.main_window.add_points(ppoints)
             elif self.main_window.eraser_enabled:
                 points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
                 self.main_window.removePoints(points, self.view_plane)

@@ -248,7 +248,6 @@ class MaskLoader(QThread):
                     color_idx = i % num_colors
                     for loc in global_locs:
                         z, y, x = loc
-                        self.parent.pure_coordinates.append((x, y, z))
                         self.parent.foreground_points.append((x, y, z, i, color_idx))
                         if z not in self.parent.z_view_dict:
                             self.parent.z_view_dict[z] = []
@@ -269,6 +268,8 @@ class MaskLoader(QThread):
             # mask = np.load(self.filename)
             if np.issubdtype(mask.dtype, np.floating):
                 mask = mask.astype(int)
+            if self.parent.image_data is None:
+                return
             if mask.shape != self.parent.image_data.shape:
                 self.error_signal.emit("Mask shape does not match image shape")
                 self.finished.emit()
@@ -293,7 +294,6 @@ class MaskLoader(QThread):
                     color_idx = i % num_colors
                     for loc in global_locs:
                         z, y, x = loc
-                        self.parent.pure_coordinates.append((x, y, z))
                         self.parent.foreground_points.append((x, y, z, i, color_idx))
                         if z not in self.parent.z_view_dict:
                             self.parent.z_view_dict[z] = []
@@ -319,7 +319,6 @@ class MaskLoader(QThread):
         current_tab = self.parent.tab_widget.currentWidget()
         #if self.parent.data_per_tab[current_tab].get("foreground_points") is not None:
         self.parent.data_per_tab[current_tab]["foreground_points"] = self.parent.foreground_points
-        self.parent.data_per_tab[current_tab]["pure_coordinates"] = self.parent.pure_coordinates
         self.parent.data_per_tab[current_tab]["z_view_dict"] = self.parent.z_view_dict
         self.parent.data_per_tab[current_tab]["y_view_dict"] = self.parent.y_view_dict
         self.parent.data_per_tab[current_tab]["x_view_dict"] = self.parent.x_view_dict
@@ -344,7 +343,6 @@ class MaskLoader(QThread):
                 color_idx = i % num_colors
                 for loc in global_locs:
                     z, y, x = loc
-                    self.parent.pure_coordinates.append((x, y, z))
                     self.parent.foreground_points.append((x, y, z, i, color_idx))
                     if z not in self.parent.z_view_dict:
                         self.parent.z_view_dict[z] = []
@@ -372,7 +370,6 @@ class MaskLoader(QThread):
         current_tab = self.parent.tab_widget.currentWidget()
         #if self.parent.data_per_tab[current_tab].get("foreground_points") is not None:
         self.parent.data_per_tab[current_tab]["foreground_points"] = self.parent.foreground_points
-        self.parent.data_per_tab[current_tab]["pure_coordinates"] = self.parent.pure_coordinates
         self.parent.data_per_tab[current_tab]["z_view_dict"] = self.parent.z_view_dict
         self.parent.data_per_tab[current_tab]["y_view_dict"] = self.parent.y_view_dict
         self.parent.data_per_tab[current_tab]["x_view_dict"] = self.parent.x_view_dict
