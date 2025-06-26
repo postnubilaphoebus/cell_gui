@@ -16,7 +16,6 @@ from PyQt5.QtWidgets import (QApplication,
                              QTabWidget)
 from PyQt5.QtCore import Qt, QSize, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QCursor
-import math
 from scipy.ndimage import label, find_objects
 from cmaps import glasbey_cmap, glasbey_cmap_rgb
 from gui_widgets import *
@@ -50,7 +49,30 @@ class MainWindow(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         layout = QVBoxLayout(self.central_widget)
-
+        self.foreground_enabled = False
+        self.background_enabled = False
+        self.eraser_enabled = False
+        self.last_mouse_pos = None
+        self.first_mouse_pos_for_contrast_rect = None
+        self.last_mouse_pos_for_contrast_rect = None
+        self.first_mouse_pos_for_watershed_cube = None
+        self.last_mouse_pos_for_watershed_cube = None
+        self.xy_transform = None
+        self.xz_transform = None
+        self.yz_transform = None
+        self.xy_mouse_position = None
+        self.xz_mouse_position = None
+        self.yz_mouse_position = None
+        self.foreground_points = []
+        self.background_points = []
+        self.z_view_dict = {}
+        self.y_view_dict = {}
+        self.x_view_dict = {}
+        self.points_per_cell = {}
+        self.copied_points = []
+        self.relevant_xy_points = {}
+        self.relevant_xz_points = {}
+        self.relevant_yz_points = {}
         self.xy_view = None
         self.xz_view = None
         self.yz_view = None
@@ -166,15 +188,9 @@ class MainWindow(QMainWindow):
         self.eraser_radius_text.returnPressed.connect(self.updateEraserRadius)
         layout_buttons.addWidget(self.eraser_radius_text)
 
-        self.foreground_button = QPushButton('Brush (B)', self)
+        self.foreground_button = QPushButton('Annotate (A)', self)
         self.foreground_button.clicked.connect(self.toggleForeground)
         layout_buttons.addWidget(self.foreground_button)
-
-        self.background_button = QPushButton('Background (B)', self)
-        self.background_button.clicked.connect(self.toggleBackground)
-        self.background_button.hide()
-        layout_buttons.addWidget(self.background_button)
-
 
         self.eraser_button = QPushButton('Eraser (E)', self)
         self.eraser_button.clicked.connect(self.toggleEraser)
@@ -199,10 +215,6 @@ class MainWindow(QMainWindow):
         self.view_finder_button.clicked.connect(self.hide_show_view_finder)
         layout_buttons.addWidget(self.view_finder_button)
 
-        self.open_button = QPushButton('Open Mask (O)', self)
-        self.open_button.clicked.connect(self.open_file_dialog)
-        layout_buttons.addWidget(self.open_button)
-
         self.select_cell_button = QPushButton('Select Cell (S)', self)
         self.select_cell_button.clicked.connect(self.select_cell)
         self.select_cell_enabled = False
@@ -214,17 +226,22 @@ class MainWindow(QMainWindow):
         layout_buttons.addWidget(self.delete_cell_button)
         self.delete_cell_enabled = False
 
-        self.index_control = IndexControlWidget()
+        self.index_control = IndexControlWidget(self)
         layout_buttons.addWidget(self.index_control)
         self.index_control.increase_button.clicked.connect(self.update_index_display)
         self.index_control.decrease_button.clicked.connect(self.update_index_display)
-        self.current_highest_cell_index = 1
+        
+        self.current_highest_cell_index = 0
 
         self.cell_idx_display = TextDisplay()
         self.cell_idx_display.update_text(self.index_control.cell_index, self.current_highest_cell_index)
         layout_buttons.addWidget(self.cell_idx_display)
-        # layout.addLayout(layout_buttons)
-        # layout.addLayout(layout_buttons)
+        self.index_control.increase_button.clicked.connect(lambda: \
+                                                           self.cell_idx_display.update_text(self.index_control.cell_index, 
+                                                                                             self.current_highest_cell_index))
+        self.index_control.decrease_button.clicked.connect(lambda: \
+                                                           self.cell_idx_display.update_text(self.index_control.cell_index, 
+                                                                                             self.current_highest_cell_index))
 
         self.progress_label = QLabel('Progress: 0%', self)
         self.progress_label.hide()
@@ -264,29 +281,6 @@ class MainWindow(QMainWindow):
         self.yz_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.paint_color = QColor(Qt.red)
         self.paint_color.setAlphaF(0.3)
-        self.foreground_enabled = False
-        self.background_enabled = False
-        self.eraser_enabled = False
-        self.last_mouse_pos = None
-        self.first_mouse_pos_for_contrast_rect = None
-        self.last_mouse_pos_for_contrast_rect = None
-        self.first_mouse_pos_for_watershed_cube = None
-        self.last_mouse_pos_for_watershed_cube = None
-        self.xy_transform = None
-        self.xz_transform = None
-        self.yz_transform = None
-        self.xy_mouse_position = None
-        self.xz_mouse_position = None
-        self.yz_mouse_position = None
-        self.foreground_points = []
-        self.background_points = []
-        self.z_view_dict = {}
-        self.y_view_dict = {}
-        self.x_view_dict = {}
-        self.copied_points = []
-        self.relevant_xy_points = {}
-        self.relevant_xz_points = {}
-        self.relevant_yz_points = {}
         self.markers_enabled = True
         self.update_xz_view()
         self.update_yz_view()
@@ -298,12 +292,17 @@ class MainWindow(QMainWindow):
         self.relevant_xz_points_loaded = False
         self.relevant_yz_points_loaded = False
         self.alpha_label_index = None
+        self.most_recent_focus = "XY"
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
+
+    def update_highest_cell_index(self):
+        if self.index_control.cell_index > self.current_highest_cell_index:
+            self.current_highest_cell_index = self.index_control.cell_index
 
     def slider_value_text(self, val):
         return f"Z-Planes (1,2): {val}/{self.slider.maximum()}"
@@ -322,6 +321,11 @@ class MainWindow(QMainWindow):
     
     def update_sliderx_text(self):
         self.sliderx_label.setText(self.sliderx_value_text(self.sliderx.value()))
+
+    def update_highest_cell_index(self):
+        if self.index_control.cell_index > self.current_highest_cell_index:
+            self.current_highest_cell_index = self.index_control.cell_index
+            self.update_index_display()
 
     def dropEvent(self, event):
         urls = event.mimeData().urls()
@@ -543,7 +547,8 @@ class MainWindow(QMainWindow):
                 "z_view_dict": {k: v.copy() for k, v in self.z_view_dict.items()},#self.z_view_dict.copy(),
                 "y_view_dict": {k: v.copy() for k, v in self.y_view_dict.items()},#self.y_view_dict.copy(),
                 "x_view_dict": {k: v.copy() for k, v in self.x_view_dict.items()},# self.x_view_dict.copy(),
-                "copied_points": self.copied_points.copy()
+                "copied_points": self.copied_points.copy(),
+                "points_per_cell": {k: v.copy() for k, v in self.points_per_cell.items()}
             }
             self.initial_view += 1
         else:
@@ -655,7 +660,8 @@ class MainWindow(QMainWindow):
                 "z_view_dict": {k: v.copy() for k, v in self.z_view_dict.items()},#self.z_view_dict.copy(),
                 "y_view_dict": {k: v.copy() for k, v in self.y_view_dict.items()},#self.y_view_dict.copy(),
                 "x_view_dict": {k: v.copy() for k, v in self.x_view_dict.items()},#self.x_view_dict.copy(),
-                "copied_points": self.copied_points.copy()
+                "copied_points": self.copied_points.copy(),
+                "points_per_cell": {k: v.copy() for k, v in self.points_per_cell.items()}
             }
             self.tab_widget.setCurrentWidget(image_view_widget)
 
@@ -668,7 +674,14 @@ class MainWindow(QMainWindow):
             self.update_xy_view()
             self.update_xz_view()
             self.update_yz_view()
-            self.xy_view.setFocus() # always focus on xy view by default
+            if self.most_recent_focus == "XY":
+                self.xy_view.setFocus()
+            elif self.most_recent_focus == "XZ":
+                self.xz_view.setFocus()
+            elif self.most_recent_focus == "YZ":
+                self.yz_view.setFocus()
+            else:
+                self.xy_view.setFocus()
 
     def close_tab(self, index):
         num_tabs = self.tab_widget.count()
@@ -720,6 +733,7 @@ class MainWindow(QMainWindow):
         self.z_view_dict = self.data_per_tab[current_tab].get("z_view_dict")
         self.y_view_dict = self.data_per_tab[current_tab].get("y_view_dict")
         self.x_view_dict = self.data_per_tab[current_tab].get("x_view_dict")
+        self.points_per_cell = self.data_per_tab[current_tab].get("points_per_cell")
         self.copied_points = []
         self.synch_transform()
         
@@ -794,7 +808,7 @@ class MainWindow(QMainWindow):
             mbox.exec_()
             if mbox.clickedButton() == load_mask_btn:
                 if self.tab_widget.count() >= 1:
-                    self.load_masks(filename, True)
+                    self.load_masks(filename)
                     return None
                 else:
                     QMessageBox.critical(self, "Error", "Failed to load mask as no image present:")
@@ -866,7 +880,14 @@ class MainWindow(QMainWindow):
 
         self.tab_widget.setCurrentIndex(self.tab_widget.count() - 1)
         self.synch_transform()
-        self.xy_view.setFocus()
+        if self.most_recent_focus == "XY":
+            self.xy_view.setFocus()
+        elif self.most_recent_focus == "XZ":
+            self.xz_view.setFocus()
+        elif self.most_recent_focus == "YZ":
+            self.yz_view.setFocus()
+        else:
+            self.xy_view.setFocus()
     
     def open_file(self):
         options = QFileDialog.Options()
@@ -887,7 +908,7 @@ class MainWindow(QMainWindow):
             file_name, _ = QFileDialog.getOpenFileName(self, "Load Mask", "", "Numpy Files (*.npy)", options=options)
             if not file_name:
                 return
-            self.load_masks(file_name, False)
+            self.load_masks(file_name)
         else:
             QMessageBox.information(self, "No Image Found", "Please load an image first!")
 
@@ -942,7 +963,7 @@ class MainWindow(QMainWindow):
             self.select_cell_button.setStyleSheet("")
             self.alpha_label_index = None
             self.new_cell_selected = False
-            self.index_control.cell_index = self.current_highest_cell_index
+            #self.index_control.cell_index = self.current_highest_cell_index
             self.update_index_display()
             self.update_xy_view()
             self.update_xz_view()
@@ -968,6 +989,8 @@ class MainWindow(QMainWindow):
         self.progress_label.setVisible(False)
 
     def update_index_display(self):
+        if len(self.points_per_cell) > 0:
+            self.current_highest_cell_index = max(self.points_per_cell.keys())
         self.cell_idx_display.update_text(self.index_control.cell_index, self.current_highest_cell_index)
 
     def toggleForeground(self):
@@ -977,17 +1000,23 @@ class MainWindow(QMainWindow):
             self.background_enabled = False
             self.eraser_enabled = False
             self.foreground_button.setStyleSheet("background-color: lightgreen")
-            self.background_button.setStyleSheet("")
             self.eraser_button.setStyleSheet("")
             self.central_widget.setCursor(self.brush_cursor)
         else:
             self.drawing = False
             self.foreground_enabled = False
             self.foreground_button.setStyleSheet("")
-            self.background_button.setStyleSheet("")
             self.eraser_button.setStyleSheet("")
+        if self.most_recent_focus == "XY":
+            self.xy_view.setFocus()
+        elif self.most_recent_focus == "XZ":
+            self.xz_view.setFocus()
+        elif self.most_recent_focus == "YZ":
+            self.yz_view.setFocus()
+        else:
+            self.xy_view.setFocus()
         self.repaint()
-        self.central_widget.clearFocus()
+        #self.central_widget.clearFocus()
         
     def toggleBackground(self):
         if not self.background_enabled:
@@ -995,18 +1024,16 @@ class MainWindow(QMainWindow):
             self.foreground_enabled = False
             self.background_enabled = True
             self.eraser_enabled = False
-            self.background_button.setStyleSheet("background-color: lightgreen")
             self.foreground_button.setStyleSheet("")
             self.eraser_button.setStyleSheet("")
             self.central_widget.setCursor(self.brush_cursor)
         else:
             self.drawing = False
             self.background_enabled = False
-            self.background_button.setStyleSheet("")
             self.foreground_button.setStyleSheet("")
             self.eraser_button.setStyleSheet("")
         self.repaint()
-        self.central_widget.clearFocus()
+        #self.central_widget.clearFocus()
         
     def toggleEraser(self):
         self.foreground_enabled = False
@@ -1016,15 +1043,13 @@ class MainWindow(QMainWindow):
             self.drawing = True
             self.eraser_button.setStyleSheet("background-color: lightgreen")
             self.foreground_button.setStyleSheet("")
-            self.background_button.setStyleSheet("")
         else:
             self.eraser_enabled = False
             self.drawing = False
             self.eraser_button.setStyleSheet("")
             self.foreground_button.setStyleSheet("")
-            self.background_button.setStyleSheet("")
         self.repaint()
-        self.central_widget.clearFocus()
+        #self.central_widget.clearFocus()
         
     def updateBrushWidthFromLineEdit(self):
         new_width_str = self.brush_text.text()
@@ -1062,11 +1087,7 @@ class MainWindow(QMainWindow):
     def remove_pts_slice_view_dicts(self, temp_z_view_removal_dict, 
                                     temp_y_view_removal_dict, 
                                     temp_x_view_removal_dict):
-        
-        # get the indices to remove
-        # self.z_view_dict[p[2]] = [
-        # z_point for z_point in self.z_view_dict[p[2]] 
-        # if z_point[0] != p[0] or z_point[1] != p[1] or z_point[2] != p[3] or z_point[3] != p[4]
+
         for k, v in temp_z_view_removal_dict.items():
             np_z_pts = self.z_view_dict.get(k)
             if np_z_pts is not None:
@@ -1100,8 +1121,35 @@ class MainWindow(QMainWindow):
                 if indices_to_remove.size == 0:
                     continue
                 self.x_view_dict[k] = np.delete(np_x_pts, indices_to_remove, axis=0)
-        
 
+    def removeCell(self, cell_idx):
+        # cell_points structure:
+        # x, y, z, target_label, cell_id
+        cell_points = self.points_per_cell.get(cell_idx)
+        if cell_points is None:
+            return
+        temp_z_view_removal_dict = {}
+        temp_y_view_removal_dict = {}
+        temp_x_view_removal_dict = {}
+        for p in cell_points:                   
+            if p[2] not in temp_z_view_removal_dict:
+                temp_z_view_removal_dict[p[2]] = []
+            if p[1] not in temp_y_view_removal_dict:
+                temp_y_view_removal_dict[p[1]] = []
+            if p[0] not in temp_x_view_removal_dict:
+                temp_x_view_removal_dict[p[0]] = []
+            temp_z_view_removal_dict[p[2]].append((p[0], p[1], p[3], p[4]))
+            temp_y_view_removal_dict[p[1]].append((p[2], p[0], p[3], p[4]))
+            temp_x_view_removal_dict[p[0]].append((p[2], p[1], p[3], p[4]))
+        temp_z_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_z_view_removal_dict.items()}
+        temp_y_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_removal_dict.items()}
+        temp_x_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_removal_dict.items()}
+        self.remove_pts_slice_view_dicts(temp_z_view_removal_dict, temp_y_view_removal_dict, temp_x_view_removal_dict)
+        self.update_xy_view()
+        self.update_xz_view()
+        self.update_yz_view()
+
+        
     def removePoints(self, point, view_plane):
         if self.eraser_enabled and self.markers_enabled:
             # Determine the coordinate indices based on the view plane
@@ -1265,12 +1313,12 @@ class MainWindow(QMainWindow):
             temp_x_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_removal_dict.items()}
             self.remove_pts_slice_view_dicts(temp_z_view_removal_dict, temp_y_view_removal_dict, temp_x_view_removal_dict)
         
-    def load_masks(self, filename, load_background = False):
+    def load_masks(self, filename):
         # Show the loading screen
         self.loading_screen = LoadingScreen()
         self.loading_screen.show()
         # Create and start the worker thread
-        self.mask_loader = MaskLoader(self, filename, load_background)
+        self.mask_loader = MaskLoader(self, filename)
         self.mask_loader.error_signal.connect(self.show_error)
         self.mask_loader.ask_user_signal.connect(self.shift_minimum_index)
         self.label_shift_answer.connect(self.mask_loader.on_user_answer)
@@ -1289,7 +1337,11 @@ class MainWindow(QMainWindow):
         answer_bool = (answer == QMessageBox.Yes)
         self.label_shift_answer.emit(answer_bool)
 
-    def add_pts_slice_view_dicts(self, temp_z_view_dict, temp_y_view_dict, temp_x_view_dict):
+    def add_pts_slice_view_dicts(self, 
+                                 temp_z_view_dict, 
+                                 temp_y_view_dict, 
+                                 temp_x_view_dict,
+                                 temp_points_per_cell_dict):
         for k, v in temp_z_view_dict.items():
             np_z_pts = self.z_view_dict.get(k)
             if np_z_pts is not None:
@@ -1329,6 +1381,19 @@ class MainWindow(QMainWindow):
                 self.x_view_dict[k] = np.append(np_x_pts, v, axis=0)
             else:
                 self.x_view_dict[k] = v
+        for k, v in temp_points_per_cell_dict.items():
+            np_pts = self.points_per_cell.get(k)
+            if np_pts is not None:
+                coors_present = np_pts[:, :3]
+                v_rows = v[:, :3].view([('', v.dtype)] * 3).reshape(-1)
+                coors_rows = coors_present.view([('', coors_present.dtype)] * 3).reshape(-1)
+                occupied_mask = ~np.isin(v_rows, coors_rows)
+                v = v[occupied_mask]
+                if v.size == 0:
+                    continue
+                self.points_per_cell[k] = np.append(np_pts, v, axis=0)
+            else:
+                self.points_per_cell[k] = v
 
     def add_points(self, point):
         if not isinstance(point, list):
@@ -1336,21 +1401,26 @@ class MainWindow(QMainWindow):
         temp_z_view_dict = {}
         temp_y_view_dict = {}
         temp_x_view_dict = {}
+        temp_points_per_cell_dict = {}
         for p in point:                   
-            self.foreground_points.append(p)
+            #self.foreground_points.append(p)
+            if p[3] not in temp_points_per_cell_dict:
+                temp_points_per_cell_dict[p[3]] = []
             if p[2] not in temp_z_view_dict:
                 temp_z_view_dict[p[2]] = []
             if p[1] not in temp_y_view_dict:
                 temp_y_view_dict[p[1]] = []
             if p[0] not in temp_x_view_dict:
                 temp_x_view_dict[p[0]] = []
+            temp_points_per_cell_dict[p[3]].append(p)
             temp_z_view_dict[p[2]].append((p[0], p[1], p[3], p[4]))
             temp_y_view_dict[p[1]].append((p[0], p[2], p[3], p[4]))
             temp_x_view_dict[p[0]].append((p[2], p[1], p[3], p[4]))
         temp_z_view_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_z_view_dict.items()}
         temp_y_view_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_dict.items()}
         temp_x_view_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_dict.items()}
-        self.add_pts_slice_view_dicts(temp_z_view_dict, temp_y_view_dict, temp_x_view_dict)
+        temp_points_per_cell_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_points_per_cell_dict.items()}
+        self.add_pts_slice_view_dicts(temp_z_view_dict, temp_y_view_dict, temp_x_view_dict, temp_points_per_cell_dict)
 
     def on_masks_loaded(self):
         self.loading_screen.hide()
@@ -1365,22 +1435,16 @@ class MainWindow(QMainWindow):
         options = QFileDialog.Options()
         file_name, _ = QFileDialog.getOpenFileName(self, "Load Mask", "", "Numpy Files (*.npy)", options=options)
         if file_name:
-            self.load_masks(file_name, False)
+            self.load_masks(file_name)
 
     def findCell(self):
-        pts = self.foreground_points
-        if pts:
-            last_cell_index = pts[-1][3]
-            matching_points = [point[:4] for point in pts if point[3] == last_cell_index]
-            if len(matching_points) > 2:
-                average_point = np.median(matching_points, axis=0)
-                self.slidery.setValue(round(average_point[1]))
-                self.sliderx.setValue(round(average_point[0]))
-                self.slider.setValue(round(average_point[2]))
-            else:
-                self.slidery.setValue(pts[-1][1])
-                self.sliderx.setValue(pts[-1][0])
-                self.slider.setValue(pts[-1][2])
+        cell_points = self.points_per_cell.get(self.current_highest_cell_index)
+        if cell_points is not None:
+            xyz_points = cell_points[:, :3]
+            average_point = np.median(xyz_points, axis=0)
+            self.slidery.setValue(round(average_point[1]))
+            self.sliderx.setValue(round(average_point[0]))
+            self.slider.setValue(round(average_point[2]))
         else:
             QMessageBox.about(self, "Foreground empty", "%s" % ("Please draw cells using the foreground button"))
 

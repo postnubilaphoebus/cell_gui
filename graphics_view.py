@@ -41,6 +41,7 @@ class GraphicsView(QGraphicsView):
 
     def focusInEvent(self, event):
         self.setStyleSheet("border: 1px solid lightgreen;")
+        self.main_window.most_recent_focus = self.view_plane
         super().focusInEvent(event)
 
     def focusOutEvent(self, event):
@@ -106,7 +107,7 @@ class GraphicsView(QGraphicsView):
             self.main_window.update_yz_view()
         elif event.key() == Qt.Key_E:
             self.main_window.toggleEraser()
-        elif event.key() == Qt.Key_B:
+        elif event.key() == Qt.Key_A:
             self.main_window.toggleForeground()
         elif event.key() == Qt.Key_B:
             self.main_window.toggleBackground()
@@ -122,8 +123,6 @@ class GraphicsView(QGraphicsView):
             self.main_window.findCell()
         elif event.key() == Qt.Key_S:
             self.main_window.select_cell()
-        elif event.key() == Qt.Key_O:
-            self.main_window.open_file_dialog()
         elif event.key() == Qt.Key_D:
             self.main_window.delete_cell()
         elif event.key() == Qt.Key_P:
@@ -265,17 +264,13 @@ class GraphicsView(QGraphicsView):
                             if match_indices.size > 0:
                                 found_point = view_points[match_indices]
                                 cell_idx = found_point[0][2]
-                        indices_to_remove = []
-                        for i, p in enumerate(self.main_window.foreground_points):
-                            if p[3] == cell_idx:
-                                indices_to_remove.append(i)
-                        self.main_window.remove_indices(indices_to_remove)
+                        if cell_idx is not None:
+                            self.main_window.removeCell(cell_idx)
                 event.accept()
                 return
 
             if not self.main_window.new_cell_selected \
                 and self.main_window.select_cell_enabled \
-                and self.main_window.foreground_points \
                 and self.main_window.markers_enabled:
                 pixmap_item = self._pixmap_item
                 point = self.obtain_current_point(pixmap_item, event, self.view_plane)
@@ -303,11 +298,11 @@ class GraphicsView(QGraphicsView):
                     else:
                         return
                     if cell_idx:
-                        self.main_window.new_cell_selected = True
+                        #self.main_window.new_cell_selected = True
                         self.main_window.index_control.cell_index = cell_idx
                         self.main_window.update_index_display()
                         self.main_window.alpha_label_index = cell_idx
-                        self.main_window.index_control.update_index(self.main_window.index_control.cell_index, 
+                        self.main_window.index_control.update_index(cell_idx, 
                                                                     self.main_window.current_highest_cell_index)
                         self.main_window.update_xy_view()
                         self.main_window.update_xz_view()

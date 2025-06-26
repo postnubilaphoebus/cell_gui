@@ -5,7 +5,8 @@ from PyQt5.QtWidgets import (QApplication,
                              QSlider,
                              QPushButton,
                              QLabel,
-                             QTextEdit)
+                             QTextEdit,
+                             QSizePolicy)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QMovie
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QFormLayout, QSpinBox, QSlider, QDialog, QMessageBox
@@ -210,11 +211,10 @@ class MaskLoader(QThread):
     user_answer_received = pyqtSignal(bool)
     ask_user_signal = pyqtSignal()
 
-    def __init__(self, parent, filename, load_background=False):
+    def __init__(self, parent, filename):
         super().__init__()
         self.parent = parent
         self.filename = filename
-        self.load_background = load_background
         self.minimum_index = None
         self.mask = None
 
@@ -258,8 +258,9 @@ class MaskLoader(QThread):
                         if x not in self.parent.x_view_dict:
                             self.parent.x_view_dict[x] = []
                         self.parent.x_view_dict[x].append((z, y, i, color_idx))
-                        if self.load_background:
-                            self.parent.background_points.append((x, y, z, i, color_idx))
+                        if i not in self.parent.points_per_cell:
+                            self.parent.points_per_cell[i] = []
+                        self.parent.points_per_cell[i].append((x, y, z, i, color_idx))
                     if i > self.parent.index_control.cell_index:
                         self.parent.index_control.cell_index = i
                 self.progress.emit(i)
@@ -304,8 +305,9 @@ class MaskLoader(QThread):
                         if x not in self.parent.x_view_dict:
                             self.parent.x_view_dict[x] = []
                         self.parent.x_view_dict[x].append((z, y, i, color_idx))
-                        if self.load_background:
-                            self.parent.background_points.append((x, y, z, i, color_idx))
+                        if i not in self.parent.points_per_cell:
+                            self.parent.points_per_cell[i] = []
+                        self.parent.points_per_cell[i].append((x, y, z, i, color_idx))
                     if i > self.parent.index_control.cell_index:
                         self.parent.index_control.cell_index = i
                 self.progress.emit(i)
@@ -314,10 +316,11 @@ class MaskLoader(QThread):
         self.parent.z_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.z_view_dict.items()}
         self.parent.y_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.y_view_dict.items()}
         self.parent.x_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.x_view_dict.items()}
+        self.parent.points_per_cell = {k: np.array(v, dtype=np.int32) for k, v in self.parent.points_per_cell.items()}
 
         self.parent.foreground_points = sorted(self.parent.foreground_points, key=lambda x: x[-1])
         current_tab = self.parent.tab_widget.currentWidget()
-        #if self.parent.data_per_tab[current_tab].get("foreground_points") is not None:
+        self.parent.data_per_tab[current_tab]["points_per_cell"] = self.parent.points_per_cell
         self.parent.data_per_tab[current_tab]["foreground_points"] = self.parent.foreground_points
         self.parent.data_per_tab[current_tab]["z_view_dict"] = self.parent.z_view_dict
         self.parent.data_per_tab[current_tab]["y_view_dict"] = self.parent.y_view_dict
@@ -353,8 +356,9 @@ class MaskLoader(QThread):
                     if x not in self.parent.x_view_dict:
                         self.parent.x_view_dict[x] = []
                     self.parent.x_view_dict[x].append((z, y, i, color_idx))
-                    if self.load_background:
-                        self.parent.background_points.append((x, y, z, i, color_idx))
+                    if i not in self.parent.points_per_cell:
+                        self.parent.points_per_cell[i] = []
+                    self.parent.points_per_cell[i].append((x, y, z, i, color_idx))
                 if i > self.parent.index_control.cell_index:
                     self.parent.index_control.cell_index = i
             self.progress.emit(i)
@@ -362,6 +366,7 @@ class MaskLoader(QThread):
         self.parent.z_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.z_view_dict.items()}
         self.parent.y_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.y_view_dict.items()}
         self.parent.x_view_dict = {k: np.array(v, dtype=np.int32) for k, v in self.parent.x_view_dict.items()}
+        self.parent.points_per_cell = {k: np.array(v, dtype=np.int32) for k, v in self.parent.points_per_cell.items()}
 
         self.finish_work()
 
@@ -369,6 +374,7 @@ class MaskLoader(QThread):
         self.parent.foreground_points = sorted(self.parent.foreground_points, key=lambda x: x[-1])
         current_tab = self.parent.tab_widget.currentWidget()
         #if self.parent.data_per_tab[current_tab].get("foreground_points") is not None:
+        self.parent.data_per_tab[current_tab]["points_per_cell"] = self.parent.points_per_cell
         self.parent.data_per_tab[current_tab]["foreground_points"] = self.parent.foreground_points
         self.parent.data_per_tab[current_tab]["z_view_dict"] = self.parent.z_view_dict
         self.parent.data_per_tab[current_tab]["y_view_dict"] = self.parent.y_view_dict
@@ -423,10 +429,10 @@ class Estimating_Cell_Thresholds(QThread):
         self.finished.emit()
 
 class IndexControlWidget(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, main_window, parent=None):
         super().__init__(parent)
-
         self.cell_index = 1
+        self.main_window = main_window
         layout = QHBoxLayout()
         self.decrease_button = QPushButton('<')
         self.decrease_button.clicked.connect(self.decrease_index)
@@ -446,9 +452,13 @@ class IndexControlWidget(QWidget):
         self.repaint()
 
     def increase_index(self):
-        self.cell_index += 1
-        self.index_label.setText(str(self.cell_index))
-        self.repaint()
+        if len(self.main_window.points_per_cell) == 0:
+            return
+        pts_now = self.main_window.points_per_cell.get(self.cell_index)
+        if pts_now is not None:
+            self.cell_index += 1
+            self.index_label.setText(str(self.cell_index))
+            self.repaint()
 
     def update_index(self, number, highest_index):
         self.cell_index = number
@@ -458,10 +468,12 @@ class IndexControlWidget(QWidget):
 
 class TextDisplay(QTextEdit):
     def __init__(self, parent=None):
+        
         super().__init__(parent)
         self.setReadOnly(True)
-        self.setMaximumHeight(40)
-        self.setMaximumWidth(170)
+        self.setMinimumHeight(50)
+        self.setMaximumHeight(50)
+        self.setMaximumWidth(250)
         self.setAlignment(Qt.AlignCenter)
 
     def update_text(self, number, highest_index):
