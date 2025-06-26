@@ -1064,6 +1064,9 @@ class MainWindow(QMainWindow):
                                     temp_x_view_removal_dict):
         
         # get the indices to remove
+        # self.z_view_dict[p[2]] = [
+        # z_point for z_point in self.z_view_dict[p[2]] 
+        # if z_point[0] != p[0] or z_point[1] != p[1] or z_point[2] != p[3] or z_point[3] != p[4]
         for k, v in temp_z_view_removal_dict.items():
             np_z_pts = self.z_view_dict.get(k)
             if np_z_pts is not None:
@@ -1115,12 +1118,11 @@ class MainWindow(QMainWindow):
                 
                 if z_plane_array is None:
                     return
-                radius = self.eraser_radius
-
+                
                 # Extract coordinates and target label (assuming all points have same target_label)
                 eraser_x = points_array[:, 0]
                 eraser_y = points_array[:, 1]
-                target_label = points_array[0, 4]  # All points should have same target_label
+                target_label = points_array[0, 3]  # All points should have same target_label
 
                 # Extract coordinates and labels from z_plane_array
                 points_x = z_plane_array[:, 0]
@@ -1130,19 +1132,9 @@ class MainWindow(QMainWindow):
                 # Vectorized conditions - check if any eraser point is within radius
                 label_match = points_labels == target_label
 
-                # For each point in z_plane_array, check if it's within radius of ANY eraser point
-                # Using broadcasting: (n_z_points, 1) vs (1, n_eraser_points)
-                x_diffs = np.abs(points_x[:, np.newaxis] - eraser_x[np.newaxis, :])
-                y_diffs = np.abs(points_y[:, np.newaxis] - eraser_y[np.newaxis, :])
-                distances = np.sqrt(x_diffs**2 + y_diffs**2)
-
-                # Check if within radius for any eraser point
-                x_within_radius = np.any(x_diffs <= radius, axis=1)
-                y_within_radius = np.any(y_diffs <= radius, axis=1)
-                distance_within_radius = np.any(distances <= radius, axis=1)
-
-                # Combine all conditions
-                mask = label_match & x_within_radius & y_within_radius & distance_within_radius
+                points_x_match = np.isin(points_x, eraser_x)
+                points_y_match = np.isin(points_y, eraser_y) 
+                mask = label_match & points_x_match & points_y_match 
 
                 # Build points_to_remove as numpy array using vectorized indexing
                 if np.any(mask):
@@ -1154,8 +1146,8 @@ class MainWindow(QMainWindow):
                         selected_points[:, 0],  # p[0] - x coordinate
                         selected_points[:, 1],  # p[1] - y coordinate
                         np.full(len(selected_points), point_z_index),  # point[2] - z index
-                        selected_points[:, 2],  # p[2] - original third column
-                        selected_points[:, 3]   # p[3] - label
+                        selected_points[:, 2],  # p[2] - label
+                        selected_points[:, 3]   # p[3] - color index
                     ])
                 else:
                     points_to_remove = []
@@ -1171,34 +1163,24 @@ class MainWindow(QMainWindow):
                     y_plane_array = self.y_view_dict.get(points_array[0, 1])
                 if y_plane_array is None:
                     return
-                radius = self.eraser_radius
 
                 # Extract coordinates and target label (assuming all points have same target_label)
-                eraser_x = points_array[:, 0]
-                eraser_y = points_array[:, 2]
-                target_label = points_array[0, 4]  # All points should have same target_label
+                eraser_x = points_array[:, 2]
+                eraser_y = points_array[:, 0]
+                target_label = points_array[0, 3]  # All points should have same target_label
                 
                 # Extract coordinates and labels from z_plane_array
-                points_x = y_plane_array[:, 0]
-                points_y = y_plane_array[:, 1]
+                points_x = y_plane_array[:, 1]
+                points_y = y_plane_array[:, 0]
                 points_labels = y_plane_array[:, 3]
 
                 # Vectorized conditions - check if any eraser point is within radius
                 label_match = points_labels == target_label
-
-                # For each point in y_plane_array, check if it's within radius of ANY eraser point
-                # Using broadcasting: (n_y_points, 1) vs (1, n_eraser_points)
-                x_diffs = np.abs(points_x[:, np.newaxis] - eraser_x[np.newaxis, :])
-                y_diffs = np.abs(points_y[:, np.newaxis] - eraser_y[np.newaxis, :])
-                distances = np.sqrt(x_diffs**2 + y_diffs**2)
-
-                # Check if within radius for any eraser point
-                x_within_radius = np.any(x_diffs <= radius, axis=1)
-                y_within_radius = np.any(y_diffs <= radius, axis=1)
-                distance_within_radius = np.any(distances <= radius, axis=1)
+                points_x_match = np.isin(points_x, eraser_x) 
+                points_y_match = np.isin(points_y, eraser_y) 
 
                 # Combine all conditions
-                mask = label_match & x_within_radius & y_within_radius & distance_within_radius
+                mask = label_match & points_x_match & points_y_match 
 
                 # Build points_to_remove as numpy array using vectorized indexing
                 if np.any(mask):
@@ -1207,11 +1189,11 @@ class MainWindow(QMainWindow):
                     # as they should all have the same z-coordinate/index
                     point_y_index = points_array[0, 1]
                     points_to_remove = np.column_stack([
-                        selected_points[:, 0],  # p[0] - x coordinate
+                        selected_points[:, 1],  # p[0] - x coordinate
                         np.full(len(selected_points), point_y_index),
-                        selected_points[:, 1],  # p[1] - y coordinate
-                        selected_points[:, 2],  # p[2] - original third column
-                        selected_points[:, 3]   # p[3] - label
+                        selected_points[:, 0],  # p[1] - z coordinate
+                        selected_points[:, 2],  # p[2] - label
+                        selected_points[:, 3]   # p[3] - color index
                     ])
                 else:
                     points_to_remove = []
@@ -1227,14 +1209,10 @@ class MainWindow(QMainWindow):
                     x_plane_array = self.x_view_dict.get(points_array[0, 0])
                 if x_plane_array is None:
                     return
-                radius = self.eraser_radius
-                if x_plane_array is None:
-                    return
-                
                 # Extract coordinates and target label (assuming all points have same target_label)
                 eraser_x = points_array[:, 2]
                 eraser_y = points_array[:, 1]
-                target_label = points_array[0, 4]  # All points should have same target_label
+                target_label = points_array[0, 3]  # All points should have same target_label
 
                 # Extract coordinates and labels from x_plane_array
                 points_x = x_plane_array[:, 0]
@@ -1244,19 +1222,9 @@ class MainWindow(QMainWindow):
                 # Vectorized conditions - check if any eraser point is within radius
                 label_match = points_labels == target_label
 
-                # For each point in y_plane_array, check if it's within radius of ANY eraser point
-                # Using broadcasting: (n_y_points, 1) vs (1, n_eraser_points)
-                x_diffs = np.abs(points_x[:, np.newaxis] - eraser_x[np.newaxis, :])
-                y_diffs = np.abs(points_y[:, np.newaxis] - eraser_y[np.newaxis, :])
-                distances = np.sqrt(x_diffs**2 + y_diffs**2)
-
-                # Check if within radius for any eraser point
-                x_within_radius = np.any(x_diffs <= radius, axis=1)
-                y_within_radius = np.any(y_diffs <= radius, axis=1)
-                distance_within_radius = np.any(distances <= radius, axis=1)
-
-                # Combine all conditions
-                mask = label_match & x_within_radius & y_within_radius & distance_within_radius
+                points_x_match = np.isin(points_x, eraser_x) 
+                points_y_match = np.isin(points_y, eraser_y) 
+                mask = label_match & points_x_match & points_y_match 
 
                 # Build points_to_remove as numpy array using vectorized indexing
                 if np.any(mask):
@@ -1266,10 +1234,10 @@ class MainWindow(QMainWindow):
                     point_x_index = points_array[0, 0]
                     points_to_remove = np.column_stack([
                         np.full(len(selected_points), point_x_index),
-                        selected_points[:, 0],  # p[0] - x coordinate
-                        selected_points[:, 1],  # p[1] - y coordinate
-                        selected_points[:, 2],  # p[2] - original third column
-                        selected_points[:, 3]   # p[3] - label
+                        selected_points[:, 1],  # p[0] - y coordinate
+                        selected_points[:, 0],  # p[1] - z coordinate
+                        selected_points[:, 2],  # p[2] - label
+                        selected_points[:, 3]   # p[3] - color index
                     ])
                 else:
                     points_to_remove = []
@@ -1278,7 +1246,6 @@ class MainWindow(QMainWindow):
             
             if len(points_to_remove) == 0:
                 return
-            
 
             temp_z_view_removal_dict = {}
             temp_y_view_removal_dict = {}
@@ -1291,12 +1258,11 @@ class MainWindow(QMainWindow):
                 if p[0] not in temp_x_view_removal_dict:
                     temp_x_view_removal_dict[p[0]] = []
                 temp_z_view_removal_dict[p[2]].append((p[0], p[1], p[3], p[4]))
-                temp_y_view_removal_dict[p[1]].append((p[0], p[2], p[3], p[4]))
+                temp_y_view_removal_dict[p[1]].append((p[2], p[0], p[3], p[4]))
                 temp_x_view_removal_dict[p[0]].append((p[2], p[1], p[3], p[4]))
             temp_z_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_z_view_removal_dict.items()}
             temp_y_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_removal_dict.items()}
             temp_x_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_removal_dict.items()}
-            
             self.remove_pts_slice_view_dicts(temp_z_view_removal_dict, temp_y_view_removal_dict, temp_x_view_removal_dict)
         
     def load_masks(self, filename, load_background = False):

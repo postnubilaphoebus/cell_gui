@@ -381,8 +381,12 @@ class GraphicsView(QGraphicsView):
                     ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.brush_width - 1)
                     self.main_window.add_points(ppoints)
             elif self.main_window.eraser_enabled:
-                points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
-                self.main_window.removePoints(points, self.view_plane)
+                if self.main_window.eraser_radius == 1:
+                    points = points + (self.main_window.index_control.cell_index,) + (self.main_window.index_control.cell_index%num_colors,)
+                    self.main_window.removePoints(points, self.view_plane)
+                else:
+                    ppoints = self.generate_nearby_points(points, self.fixed_dim, self.main_window.eraser_radius - 1)
+                    self.main_window.removePoints(ppoints, self.view_plane)
             self.main_window.update_xy_view()
             self.main_window.update_xz_view()
             self.main_window.update_yz_view()
