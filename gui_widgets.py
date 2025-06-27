@@ -477,5 +477,5 @@ class TextDisplay(QTextEdit):
         self.setAlignment(Qt.AlignCenter)
 
     def update_text(self, number, highest_index):
-        self.setText("Selected Cell Index: " + str(number) + " \nHighest Cell Index: " + str(highest_index))
+        self.setText("Active Cell Index: " + str(number) + " \nHighest Painted Cell Index: " + str(highest_index))
         self.repaint()

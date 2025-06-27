@@ -936,7 +936,7 @@ class MainWindow(QMainWindow):
             iio.imwrite(filename, mask)
     
     def on_selection_change(self, index):
-        print(f"Selected index: {index}, Item: {self.combo_box.currentText()}")
+        print(f"Active Index: {index}, Item: {self.combo_box.currentText()}")
     
     def synchronize_wheeling(self, missing_view_planes, wheel_event):
         graphics_views = [self.xy_view, self.xz_view, self.yz_view]
@@ -1084,7 +1084,8 @@ class MainWindow(QMainWindow):
         self.update_xz_view()
         self.update_yz_view()
 
-    def remove_pts_slice_view_dicts(self, temp_z_view_removal_dict, 
+    def remove_pts_slice_view_dicts(self, 
+                                    temp_z_view_removal_dict, 
                                     temp_y_view_removal_dict, 
                                     temp_x_view_removal_dict):
 
@@ -1101,6 +1102,8 @@ class MainWindow(QMainWindow):
                 self.z_view_dict[k] = np.delete(np_z_pts, indices_to_remove, axis=0)
         for k, v in temp_y_view_removal_dict.items():
             np_y_pts = self.y_view_dict.get(k)
+            print("np_y_pts: ", np_y_pts)
+            print("v: ", v)
             if np_y_pts is not None:
                 coors_present = np_y_pts[:, :2]
                 v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
@@ -1108,8 +1111,10 @@ class MainWindow(QMainWindow):
                 occupied_mask = np.isin(coors_rows, v_rows) 
                 indices_to_remove = np.argwhere(occupied_mask).flatten()
                 if indices_to_remove.size == 0:
+                    print("no to remove")
                     continue
                 self.y_view_dict[k] = np.delete(np_y_pts, indices_to_remove, axis=0)
+            print("after: ", self.y_view_dict[k])
         for k, v in temp_x_view_removal_dict.items():
             np_x_pts = self.x_view_dict.get(k)
             if np_x_pts is not None:
@@ -1145,6 +1150,7 @@ class MainWindow(QMainWindow):
         temp_y_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_removal_dict.items()}
         temp_x_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_removal_dict.items()}
         self.remove_pts_slice_view_dicts(temp_z_view_removal_dict, temp_y_view_removal_dict, temp_x_view_removal_dict)
+        self.points_per_cell.pop(cell_idx)
         self.update_xy_view()
         self.update_xz_view()
         self.update_yz_view()
@@ -1312,6 +1318,11 @@ class MainWindow(QMainWindow):
             temp_y_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_removal_dict.items()}
             temp_x_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_removal_dict.items()}
             self.remove_pts_slice_view_dicts(temp_z_view_removal_dict, temp_y_view_removal_dict, temp_x_view_removal_dict)
+            points_of_target_label = self.points_per_cell.get(target_label)
+            mask_to_remove = (points_to_remove[None, :, :] == points_of_target_label[:, None, :]).all(-1).any(1)
+            new_points_of_target_label = points_of_target_label[~mask_to_remove]
+            self.points_per_cell[target_label] = new_points_of_target_label
+
         
     def load_masks(self, filename):
         # Show the loading screen
@@ -1414,7 +1425,7 @@ class MainWindow(QMainWindow):
                 temp_x_view_dict[p[0]] = []
             temp_points_per_cell_dict[p[3]].append(p)
             temp_z_view_dict[p[2]].append((p[0], p[1], p[3], p[4]))
-            temp_y_view_dict[p[1]].append((p[0], p[2], p[3], p[4]))
+            temp_y_view_dict[p[1]].append((p[2], p[0], p[3], p[4]))
             temp_x_view_dict[p[0]].append((p[2], p[1], p[3], p[4]))
         temp_z_view_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_z_view_dict.items()}
         temp_y_view_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_dict.items()}
@@ -1488,15 +1499,16 @@ class MainWindow(QMainWindow):
                     gray_rgb = np.stack([image]*3, axis=-1)  
                     gray_rgb[points_to_paint[:, 1], points_to_paint[:, 0]] = points_to_paint[:, 2:]
                     pixmap = self.numpyArrayToPixmap(gray_rgb)
+                    if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
+                        circle_painter = QPainter(pixmap)
+                        pen = QPen(QColor(255, 0, 0, 80))
+                        pen.setWidth(1)
+                        circle_painter.setPen(pen)
+                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                        circle_painter.end()
                 else:
                     pixmap = self.numpyArrayToPixmap(image)
-                if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
-                    circle_painter = QPainter(pixmap)
-                    pen = QPen(QColor(255, 0, 0, 80))
-                    pen.setWidth(1)
-                    circle_painter.setPen(pen)
-                    circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
-                    circle_painter.end()
+                
                 if self.view_finder:
                     self.xy_painter = QPainter(pixmap)
                     pen = QPen(QColor(255, 255, 0, 80))
@@ -1558,15 +1570,16 @@ class MainWindow(QMainWindow):
                         if pts_relevant.shape[0] > 0:
                             max_box = np.max(pts_relevant, axis=0)
                             min_box = np.min(pts_relevant, axis=0)
+                    if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
+                        circle_painter = QPainter(pixmap)
+                        pen = QPen(QColor(255, 0, 0, 80))
+                        pen.setWidth(1)
+                        circle_painter.setPen(pen)
+                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                        circle_painter.end()
                 else:
                     pixmap = self.numpyArrayToPixmap(image)
-                if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
-                    circle_painter = QPainter(pixmap)
-                    pen = QPen(QColor(255, 0, 0, 80))
-                    pen.setWidth(1)
-                    circle_painter.setPen(pen)
-                    circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
-                    circle_painter.end()
+                
                 if self.view_finder:
                     painter = QPainter(pixmap)
                     pixmapx = self.slider_to_pixmap(self.slider.value(), 0, self.z_max, 0, pixmap.width())
@@ -1603,15 +1616,16 @@ class MainWindow(QMainWindow):
                         if pts_relevant.shape[0] > 0:
                             max_box = np.max(pts_relevant, axis=0)
                             min_box = np.min(pts_relevant, axis=0)
+                    if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
+                        circle_painter = QPainter(pixmap)
+                        pen = QPen(QColor(255, 0, 0, 80))
+                        pen.setWidth(1)
+                        circle_painter.setPen(pen)
+                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                        circle_painter.end()
                 else:
                     pixmap = self.numpyArrayToPixmap(image)
-                if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
-                    circle_painter = QPainter(pixmap)
-                    pen = QPen(QColor(255, 0, 0, 80))
-                    pen.setWidth(1)
-                    circle_painter.setPen(pen)
-                    circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
-                    circle_painter.end()
+                
                 if self.view_finder:    
                     painter = QPainter(pixmap)
                     pixmapy = self.slider_to_pixmap(self.slidery.value(), 0, self.y_max, 0, pixmap.height())

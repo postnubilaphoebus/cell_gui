@@ -298,7 +298,7 @@ class GraphicsView(QGraphicsView):
                     else:
                         return
                     if cell_idx:
-                        #self.main_window.new_cell_selected = True
+                        self.main_window.new_cell_selected = True
                         self.main_window.index_control.cell_index = cell_idx
                         self.main_window.update_index_display()
                         self.main_window.alpha_label_index = cell_idx
