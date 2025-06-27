@@ -24,7 +24,7 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
   Load multiple image volumes side-by-side (e.g., raw image + neural net output or raw image + HCR channel). Each tab manages its own image and cell mask independently.
 
 - **Synchronized 3D views**  
-  Navigate through **axial, sagittal, and coronal** planes. Zoom and view positions are synchronized across all views.
+  Navigate through **axial, sagittal, and coronal** planes. Zoom and view positions are synchronized across all views and tabs.
 
 - **Flexible file I/O**  
   Save and reload your work in multiple file formats such as `.tif`. Annotations are stored per tab.
