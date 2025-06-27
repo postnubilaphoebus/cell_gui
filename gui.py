@@ -1102,8 +1102,6 @@ class MainWindow(QMainWindow):
                 self.z_view_dict[k] = np.delete(np_z_pts, indices_to_remove, axis=0)
         for k, v in temp_y_view_removal_dict.items():
             np_y_pts = self.y_view_dict.get(k)
-            print("np_y_pts: ", np_y_pts)
-            print("v: ", v)
             if np_y_pts is not None:
                 coors_present = np_y_pts[:, :2]
                 v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)

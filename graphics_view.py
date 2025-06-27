@@ -334,33 +334,63 @@ class GraphicsView(QGraphicsView):
 
         elif event.button() == Qt.RightButton:
 
-            if self.main_window.copied_points:
-                view_plane_index = 2 if self.view_plane == 'XY' else 1 if self.view_plane == 'XZ' else 0
-                slider_value = self.main_window.slider.value() if view_plane_index == 2 else self.main_window.slidery.value() if view_plane_index == 1 else self.main_window.sliderx.value()
-                for p in self.main_window.copied_points:
-                    if p[-1] == view_plane_index:
-                        new_point = list(p[:5])
-                        new_point[view_plane_index] = slider_value
-                        self.main_window.add_points(tuple(new_point))
+            if len(self.main_window.copied_points) > 0:
+                # now shift by whatever index you are at
+                origin_plane = self.main_window.copied_points[0][0]
+                points_to_copy = self.main_window.copied_points[0][1]
                 self.main_window.copied_points = []
+                if origin_plane != self.view_plane:
+                    return
+                # now shift the points
+                if self.view_plane == "XY":
+                    z_index = self.main_window.slider.value()
+                    points_to_copy[:, 2] = z_index
+                elif self.view_plane == "XZ":
+                    y_index = self.main_window.slidery.value()
+                    points_to_copy[:, 1] = y_index
+                elif self.view_plane == "YZ":
+                    x_index = self.main_window.sliderx.value()
+                    points_to_copy[:, 0] = x_index
+                self.main_window.add_points(list(points_to_copy))
                 self.main_window.update_xy_view()
                 self.main_window.update_xz_view()
                 self.main_window.update_yz_view()
             else:
                 pixmap_item = self._pixmap_item
                 point = self.obtain_current_point(pixmap_item, event, self.view_plane)
-                if point:
+                if point.size > 0:
                     cell_idx = None
-                    view_plane_index = 2 if self.view_plane == 'XY' else 1 if self.view_plane == 'XZ' else 0
-                    slider_value = self.main_window.slider.value() if view_plane_index == 2 else self.main_window.slidery.value() if view_plane_index == 1 else self.main_window.sliderx.value()
-                    for p in self.main_window.foreground_points:
-                        if tuple(p[:3]) == point:
-                            cell_idx = p[3]
-                            break
+                    point = np.expand_dims(point, 0)
+                    if self.view_plane == "XY":
+                        z_index = self.main_window.slider.value()
+                        view_points = self.main_window.z_view_dict.get(z_index)
+                    elif self.view_plane == "XZ":
+                        y_index = self.main_window.slidery.value()
+                        view_points = self.main_window.y_view_dict.get(y_index)
+                        point = point[:, [0, 2, 1]]
+                    elif self.view_plane == "YZ":
+                        x_index = self.main_window.sliderx.value()
+                        view_points = self.main_window.x_view_dict.get(x_index)
+                        point = point[:, [2, 1, 0]]
+                    if view_points is not None:
+                        point = point[:, :2]
+                        matches = np.all(view_points[:, :2] == point, axis=1)
+                        match_indices = np.where(matches)[0]
+                        if match_indices.size > 0:
+                            found_point = view_points[match_indices]
+                            cell_idx = found_point[0][2]
+                    else:
+                        return
                     if cell_idx:
-                        for p in self.main_window.foreground_points:
-                            if p[3] == cell_idx and p[view_plane_index] == slider_value:
-                                self.main_window.copied_points.append(p + (p[-1],) + (view_plane_index,))
+                        relevant_points = self.main_window.points_per_cell.get(cell_idx)
+                        if self.view_plane == "XY":
+                            points_to_copy = relevant_points[relevant_points[:, 2]==z_index]
+                        elif self.view_plane == "XZ":
+                            points_to_copy = relevant_points[relevant_points[:, 1]==y_index]
+                        elif self.view_plane == "YZ":
+                            points_to_copy = relevant_points[relevant_points[:, 0]==x_index]
+                        if points_to_copy.size > 0:
+                            self.main_window.copied_points.append((self.view_plane, points_to_copy))
         event.accept()
 
     def mouseMoveEvent(self, event):
