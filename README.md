@@ -40,7 +40,6 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 - Drag and drop an image or mask anywhere in the window to load it instantly,  <br>
   or use the File button (top left) to browse and open files manually.
 
-
 ### 🖊️ Annotate (`A`)
 - Draw ROIs for cells in your chosen view (coronal, axial, or sagittal).
 - The color of your drawing indicates the current cell index.
@@ -50,6 +49,11 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 ### 🧽 Eraser (`E`)
 - Erase parts of the currently active cell only.
 - Functions like the brush tool, but in reverse.
+
+### 🔢 Cell Index Navigation
+- Use the left and right buttons to decrease or increase the currently active cell index.
+- You can only move to a higher index after painting with your current index.
+- Indexing starts at 1; the background is always saved as 0 in your mask.
 
 ### 📋 Copy & Paste Points (Right-Click)
 - Copy points in one slice and paste them in the next using right-click
@@ -78,7 +82,6 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 ---
 
 ## 🧠 Notes
-
 - Ensure all images loaded in a tab have **the same dimensions**. Concurrent viewing only works for equally sized volumes.
 - Annotations are stored separately for each tab and must be saved individually.
 
