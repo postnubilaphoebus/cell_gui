@@ -5,8 +5,8 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 ---
 
 ## Installation
-``` git clone [insert_repository_link] ```
-``` cd [insert_repo_location_on_your_machine] ```
+``` git clone [insert_repository_link] ``` <br>
+``` cd [insert_repo_location_on_your_machine] ``` <br>
 ```pip install -r requirements.txt```
 
 ---
