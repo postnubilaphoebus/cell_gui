@@ -21,7 +21,7 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 ## ✨ Features
 
 - **Multi-tab support**  
-  Load multiple image volumes side-by-side (e.g., raw image + neural net output). Each tab manages its own image and cell mask independently.
+  Load multiple image volumes side-by-side (e.g., raw image + neural net output or raw image + HCR channel). Each tab manages its own image and cell mask independently.
 
 - **Synchronized 3D views**  
   Navigate through **axial, sagittal, and coronal** planes. Zoom and view positions are synchronized across all views.
