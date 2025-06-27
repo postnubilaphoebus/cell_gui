@@ -50,7 +50,7 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 - Erase parts of the currently active cell only.
 - Functions like the brush tool, but in reverse.
 
-### 🔢 Cell Index Navigation
+### 🔢 Cell Index Navigation (`←` or `→`)
 - Use the left and right buttons to decrease or increase the currently active cell index.
 - You can only move to a higher index after painting with your current index.
 - Indexing starts at 1; the background is always saved as 0 in your mask.
