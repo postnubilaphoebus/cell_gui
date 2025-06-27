@@ -5,7 +5,7 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 ---
 
 ## Installation
-'''pip install -r requirements.txt'''
+```pip install -r requirements.txt```
 
 ---
 
