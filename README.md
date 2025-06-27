@@ -48,7 +48,7 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 
 ### 🧽 Eraser (`E`)
 - Erase parts of the currently active cell only.
-- Functions like the brush tool, but in reverse.
+- Functions like the annotation tool, but in reverse.
 
 ### 🔢 Cell Index Navigation (`←` or `→`)
 - Use the left and right buttons to decrease or increase the currently active cell index.
@@ -56,7 +56,7 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 - Indexing starts at 1; the background is always saved as 0 in your mask.
 
 ### 📋 Copy & Paste Points (Right-Click)
-- Copy points in one slice and paste them in the next using right-click
+- Copy points in one slice and paste them in the next using right-click.
 - Right-click once to copy points in the current slice.
 - Right-click again in a neighboring slice to paste — great for quickly labeling similar-looking cells across slices.
 
