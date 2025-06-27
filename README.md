@@ -4,6 +4,11 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 
 ---
 
+## Installation
+'''pip install -r requirements.txt'''
+
+---
+
 ## ✨ Features
 
 - **Multi-tab support**  
@@ -34,6 +39,11 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 ### 🧽 Eraser (`E`)
 - Erase parts of the currently active cell only.
 - Functions like the brush tool, but in reverse.
+
+### 📋 Copy & Paste Points (Right-Click)
+- Copy points in one slice and paste them in the next using right-click
+- Right-click once to copy points in the current slice.
+- Right-click again in a neighboring slice to paste — great for quickly labeling similar-looking cells across slices.
 
 ### 🎯 Find Cell (`C`)
 - Automatically navigates to the **median location** of the current cell.
