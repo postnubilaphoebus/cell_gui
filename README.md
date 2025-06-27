@@ -36,8 +36,10 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 
 ## 🛠️ Main Functions
 
-### 📁 File (Top Left Menu)
-- **Load / Save Images and Masks**
+### 📂 File Loading
+- Drag and drop an image or mask anywhere in the window to load it instantly,  <br>
+  or use the File button (top left) to browse and open files manually.
+
 
 ### 🖊️ Annotate (`A`)
 - Draw ROIs for cells in your chosen view (coronal, axial, or sagittal).
