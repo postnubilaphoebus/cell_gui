@@ -7,7 +7,7 @@ This GUI is designed to support **manual annotation of cells in 3D grayscale mic
 ## Installation
 ```git clone https://github.com/postnubilaphoebus/cell_gui.git``` <br>
 ```cd [insert_repo_location_on_your_machine] ``` <br>
-```[optionally create a new environment]```
+```[optionally create and activate a new environment]``` <br>
 ```pip install -r requirements.txt```
 
 ---
