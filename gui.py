@@ -1217,8 +1217,8 @@ class MainWindow(QMainWindow):
                     return
 
                 # Extract coordinates and target label (assuming all points have same target_label)
-                eraser_x = points_array[:, 2]
-                eraser_y = points_array[:, 0]
+                eraser_x = points_array[:, 0]
+                eraser_y = points_array[:, 2]
                 target_label = points_array[0, 3]  # All points should have same target_label
                 
                 # Extract coordinates and labels from z_plane_array
