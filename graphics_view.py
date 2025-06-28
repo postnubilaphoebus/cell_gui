@@ -141,7 +141,8 @@ class GraphicsView(QGraphicsView):
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
             y_index = self.main_window.slidery.value()
-            return np.array([lp.x(), y_index, lp.y()])
+            #return np.array([lp.x(), y_index, lp.y()])#
+            return np.array([lp.y(), y_index, lp.x()])
         elif view_plane == "YZ":
             sp = self.mapToScene(event.pos())
             lp = pixmap_item.mapFromScene(sp).toPoint()
