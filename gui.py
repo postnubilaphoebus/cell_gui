@@ -1109,10 +1109,8 @@ class MainWindow(QMainWindow):
                 occupied_mask = np.isin(coors_rows, v_rows) 
                 indices_to_remove = np.argwhere(occupied_mask).flatten()
                 if indices_to_remove.size == 0:
-                    print("no to remove")
                     continue
                 self.y_view_dict[k] = np.delete(np_y_pts, indices_to_remove, axis=0)
-            print("after: ", self.y_view_dict[k])
         for k, v in temp_x_view_removal_dict.items():
             np_x_pts = self.x_view_dict.get(k)
             if np_x_pts is not None:
