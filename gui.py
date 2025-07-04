@@ -1,51 +1,54 @@
-import sys
+import imageio.v3 as iio
 import numpy as np
 import os
-from PyQt5.QtWidgets import (QApplication, 
-                             QMainWindow, 
-                             QVBoxLayout, 
-                             QWidget, 
-                             QSlider, 
-                             QPushButton, 
-                             QLineEdit, 
-                             QLabel,  
-                             QMessageBox, 
+import sys
+from PyQt5.QtCore import Qt, QSize, pyqtSlot
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QCursor
+from PyQt5.QtWidgets import (QApplication,
+                             QMainWindow,
+                             QVBoxLayout,
+                             QWidget,
+                             QSlider,
+                             QPushButton,
+                             QLineEdit,
+                             QLabel,
+                             QMessageBox,
                              QFileDialog,
                              QSplitter,
                              QAction,
                              QTabWidget)
-from PyQt5.QtCore import Qt, QSize, pyqtSlot
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QCursor
 from scipy.ndimage import label, find_objects
-from cmaps import glasbey_cmap, glasbey_cmap_rgb
-from gui_widgets import *
-from graphics_view import GraphicsView
-import imageio.v3 as iio
 from skimage.measure import find_contours
+
+from cmaps import glasbey_cmap, glasbey_cmap_rgb
+from graphics_view import GraphicsView
+from gui_widgets import *
+
 
 class MainWindow(QMainWindow):
     label_shift_answer = pyqtSignal(bool)
-    def __init__(self, filename = None):
+
+    def __init__(self, filename=None):
         super().__init__()
         self.setAcceptDrops(True)
         self.image_min = 0
         self.image_max = 255
+        self.min_pixel_intensity = 0
+        self.max_pixel_intensity = 255
         self.z_max = 10
         self.y_max = 10
         self.x_max = 10
         self.z_min = 0
         self.y_min = 0
         self.x_min = 0
-        self.min_pixel_intensity = 0
-        self.max_pixel_intensity = 255
+        self.brush_width = 2
+        self.eraser_radius = 2
+        self.num_channels = 0
         self.image_data = None
         self.filename_list = []
         if filename is not None:
             self.load_image(filename)
             self.filename_list.append(filename)
-        self.brush_width = 2
-        self.eraser_radius = 2 
-        self.num_channels = 0
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         layout = QVBoxLayout(self.central_widget)
@@ -82,13 +85,13 @@ class MainWindow(QMainWindow):
         self.xy_view_vertical_slider_val = None
         self.xz_view_vertical_slider_val = None
         self.yz_view_vertical_slider_val = None
-        self.current_zoom_location = None#scene_pos - delta
+        self.current_zoom_location = None  # scene_pos - delta
         self.current_zoom_factor = 1
 
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
         self.tab_widget.tabCloseRequested.connect(self.close_tab)
-        self.initial_view = 0  
+        self.initial_view = 0
         self.data_per_tab = {}
         self.current_tab_index = 0
         self.tab_indices = []
@@ -99,12 +102,12 @@ class MainWindow(QMainWindow):
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
 
         layout_buttons = QVBoxLayout()
-        
+
         self.menu_bar = self.menuBar()
 
         # Create a menu
         self.file_menu = self.menu_bar.addMenu("File")
-        
+
         # Create actions for the menu
         open_image_action = QAction("Open Image (*.npy, *.tif, *.jpg, *.png)", self)
         open_image_action.triggered.connect(self.open_file)
@@ -133,27 +136,27 @@ class MainWindow(QMainWindow):
         self.slider.setSingleStep(1)
         self.slider.setTickInterval(1)
         self.slider.setTickPosition(QSlider.TicksBelow)
-        self.slider.setValue(self.z_max//2)
+        self.slider.setValue(self.z_max // 2)
         layout_buttons.addWidget(self.slider_label)
         layout_buttons.addWidget(self.slider)
-        
+
         self.slidery = QSlider(Qt.Horizontal)
         self.slidery_label = QLabel("Y-Planes (3,4)")
         self.slidery.setRange(0, self.y_max)
         self.slidery.setSingleStep(1)
         self.slidery.setTickInterval(1)
         self.slidery.setTickPosition(QSlider.TicksBelow)
-        self.slidery.setValue(self.y_max//2)
+        self.slidery.setValue(self.y_max // 2)
         layout_buttons.addWidget(self.slidery_label)
         layout_buttons.addWidget(self.slidery)
-        
+
         self.sliderx = QSlider(Qt.Horizontal)
         self.sliderx_label = QLabel("X-Planes (5,6)")
         self.sliderx.setRange(0, self.x_max)
         self.sliderx.setSingleStep(1)
         self.sliderx.setTickInterval(1)
         self.sliderx.setTickPosition(QSlider.TicksBelow)
-        self.sliderx.setValue(self.x_max//2)
+        self.sliderx.setValue(self.x_max // 2)
         layout_buttons.addWidget(self.sliderx_label)
         layout_buttons.addWidget(self.sliderx)
 
@@ -164,7 +167,7 @@ class MainWindow(QMainWindow):
         self.tab_switch_next = QPushButton("Go to next tab (N)", self)
         self.tab_switch_next.clicked.connect(self.switch_to_next_tab)
         layout_buttons.addWidget(self.tab_switch_next)
-        
+
         self.brush_label = QLabel("Brush Width:")
         layout_buttons.addWidget(self.brush_label)
         self.cursor_pix = QPixmap('paintbrush_icon.png')
@@ -173,9 +176,9 @@ class MainWindow(QMainWindow):
 
         self.droplet_cursor_pix = QPixmap('droplet_cursor.png')
         self.droplet_cursor_scaled_pix = self.droplet_cursor_pix.scaled(QSize(20, 20), Qt.KeepAspectRatio)
-        
+
         self.brush_text = QLineEdit()
-        self.brush_text.setFixedWidth(30) 
+        self.brush_text.setFixedWidth(30)
         self.brush_text.setText(str(self.brush_width))
         self.brush_text.returnPressed.connect(self.updateBrushWidthFromLineEdit)
         layout_buttons.addWidget(self.brush_text)
@@ -204,8 +207,6 @@ class MainWindow(QMainWindow):
         self.find_cell_button.clicked.connect(self.findCell)
         layout_buttons.addWidget(self.find_cell_button)
 
-        self.background_threshold = 0.0
-        self.cell_centre_threshold = 0.0
         self.markers_off_on_button = QPushButton('Masks Off/On (M)', self)
         self.markers_off_on_button.clicked.connect(self.markersOffOn)
         layout_buttons.addWidget(self.markers_off_on_button)
@@ -230,23 +231,24 @@ class MainWindow(QMainWindow):
         layout_buttons.addWidget(self.index_control)
         self.index_control.increase_button.clicked.connect(self.update_index_display)
         self.index_control.decrease_button.clicked.connect(self.update_index_display)
-        
+
         self.current_highest_cell_index = 0
 
         self.cell_idx_display = TextDisplay()
         self.cell_idx_display.update_text(self.index_control.cell_index, self.current_highest_cell_index)
         layout_buttons.addWidget(self.cell_idx_display)
         self.index_control.increase_button.clicked.connect(lambda: \
-                                                           self.cell_idx_display.update_text(self.index_control.cell_index, 
-                                                                                             self.current_highest_cell_index))
+                                                               self.cell_idx_display.update_text(
+                                                                   self.index_control.cell_index,
+                                                                   self.current_highest_cell_index))
         self.index_control.decrease_button.clicked.connect(lambda: \
-                                                           self.cell_idx_display.update_text(self.index_control.cell_index, 
-                                                                                             self.current_highest_cell_index))
+                                                               self.cell_idx_display.update_text(
+                                                                   self.index_control.cell_index,
+                                                                   self.current_highest_cell_index))
 
         self.progress_label = QLabel('Progress: 0%', self)
         self.progress_label.hide()
         layout.addWidget(self.progress_label)
-        
 
         self.slider.valueChanged.connect(self.update_xy_view)
         self.slider.valueChanged.connect(self.update_yz_view)
@@ -267,14 +269,14 @@ class MainWindow(QMainWindow):
         splitter = QSplitter()
         splitter.addWidget(self.central_widget)
         splitter.addWidget(self.side_widget)
-        splitter.setSizes([700, 300]) 
+        splitter.setSizes([700, 300])
         self.setCentralWidget(splitter)
 
-        self.drawing = False  
+        self.drawing = False
         self.dragging = False
         self.temp_past_points = []
-        self.xy_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  
-        self.xy_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)    
+        self.xy_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.xy_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.xz_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.xz_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.yz_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -306,19 +308,19 @@ class MainWindow(QMainWindow):
 
     def slider_value_text(self, val):
         return f"Z-Planes (1,2): {val}/{self.slider.maximum()}"
-    
+
     def update_slider_text(self):
         self.slider_label.setText(self.slider_value_text(self.slider.value()))
-    
+
     def slidery_value_text(self, val):
         return f"Y-Planes (3,4): {val}/{self.slidery.maximum()}"
-    
+
     def update_slidery_text(self):
         self.slidery_label.setText(self.slidery_value_text(self.slidery.value()))
-    
+
     def sliderx_value_text(self, val):
         return f"X-Planes (5,6): {val}/{self.sliderx.maximum()}"
-    
+
     def update_sliderx_text(self):
         self.sliderx_label.setText(self.sliderx_value_text(self.sliderx.value()))
 
@@ -360,8 +362,8 @@ class MainWindow(QMainWindow):
             # self.update_yz_view()
 
     def create_image_view_layout(self, image_name="Image", image_data=None):
-        
-        if self.initial_view == 0:
+
+        if self.initial_view == 0: #TODO reduce redundancy
             # Create a new QWidget for the layout
             image_view_widget = QWidget()
 
@@ -428,20 +430,18 @@ class MainWindow(QMainWindow):
             old_tab = self.tab_widget.widget(0)
             if old_tab is not None:
                 self.tab_widget.removeTab(0)
-                old_tab.deleteLater() 
+                old_tab.deleteLater()
 
             image_view_widget = QWidget()
             layout = QVBoxLayout(image_view_widget)
 
             xy_view = GraphicsView(self, "XY")
-            #xy_view = GraphicsViewVispy(self, "XY")
+            # xy_view = GraphicsViewVispy(self, "XY")
             xz_view = GraphicsView(self, "XZ")
             yz_view = GraphicsView(self, "YZ")
 
             yz_view.rotate_view(-90)
             xz_view.rotate_view(-90)
-
-            
 
             xy_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             xz_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -488,7 +488,6 @@ class MainWindow(QMainWindow):
             self.yz_view_horizontal_slider_val = self.yz_view.horizontalScrollBar().value()
             self.yz_view_vertical_slider_val = self.yz_view.verticalScrollBar().value()
 
-
             self.image_min = image_data.min()
             self.image_max = image_data.max()
             self.z_max = image_data.shape[0] - 1
@@ -511,19 +510,17 @@ class MainWindow(QMainWindow):
             self.x_view_dict = {}
             self.copied_points = []
 
-
-            
             # layout.addWidget(xy_view, stretch=1)
             # #layout.addWidget(xy_view.get_qt_widget(), stretch=1)
             # layout.addWidget(xz_view, stretch=1)
             # layout.addWidget(yz_view, stretch=1)
 
-            #self.tab_widget.insertTab(0, image_view_widget, image_name)
+            # self.tab_widget.insertTab(0, image_view_widget, image_name)
             self.tab_widget.setCurrentWidget(image_view_widget)
             current_tab = self.tab_widget.currentWidget()
             if current_tab not in self.data_per_tab:
                 self.data_per_tab[current_tab] = {}
-            self.data_per_tab[current_tab] = {
+            self.data_per_tab[current_tab] = { #TODO put into tab data class
                 "xy_view": xy_view,
                 "xz_view": xz_view,
                 "yz_view": yz_view,
@@ -544,9 +541,9 @@ class MainWindow(QMainWindow):
                 "current_highest_cell_index": self.current_highest_cell_index,
                 "foreground_points": self.foreground_points.copy(),
                 "background_points": self.background_points.copy(),
-                "z_view_dict": {k: v.copy() for k, v in self.z_view_dict.items()},#self.z_view_dict.copy(),
-                "y_view_dict": {k: v.copy() for k, v in self.y_view_dict.items()},#self.y_view_dict.copy(),
-                "x_view_dict": {k: v.copy() for k, v in self.x_view_dict.items()},# self.x_view_dict.copy(),
+                "z_view_dict": {k: v.copy() for k, v in self.z_view_dict.items()},  # self.z_view_dict.copy(),
+                "y_view_dict": {k: v.copy() for k, v in self.y_view_dict.items()},  # self.y_view_dict.copy(),
+                "x_view_dict": {k: v.copy() for k, v in self.x_view_dict.items()},  # self.x_view_dict.copy(),
                 "copied_points": self.copied_points.copy(),
                 "points_per_cell": {k: v.copy() for k, v in self.points_per_cell.items()}
             }
@@ -574,7 +571,7 @@ class MainWindow(QMainWindow):
             xy_box = QHBoxLayout()
             xz_box = QHBoxLayout()
             yz_box = QHBoxLayout()
-            
+
             xy_box.addWidget(xy_view)
             xz_box.addWidget(xz_view)
             yz_box.addWidget(yz_view)
@@ -601,7 +598,7 @@ class MainWindow(QMainWindow):
             self.yz_view_vertical_slider_val = self.yz_view.verticalScrollBar().value()
 
             # Add the widget to the tab widget
-            #self.tab_widget.addTab(image_view_widget, image_name)
+            # self.tab_widget.addTab(image_view_widget, image_name)
             self.image_min = image_data.min()
             self.image_max = image_data.max()
             self.z_max = image_data.shape[0] - 1
@@ -657,9 +654,9 @@ class MainWindow(QMainWindow):
                 "current_highest_cell_index": self.current_highest_cell_index,
                 "foreground_points": self.foreground_points.copy(),
                 "background_points": self.background_points.copy(),
-                "z_view_dict": {k: v.copy() for k, v in self.z_view_dict.items()},#self.z_view_dict.copy(),
-                "y_view_dict": {k: v.copy() for k, v in self.y_view_dict.items()},#self.y_view_dict.copy(),
-                "x_view_dict": {k: v.copy() for k, v in self.x_view_dict.items()},#self.x_view_dict.copy(),
+                "z_view_dict": {k: v.copy() for k, v in self.z_view_dict.items()},  # self.z_view_dict.copy(),
+                "y_view_dict": {k: v.copy() for k, v in self.y_view_dict.items()},  # self.y_view_dict.copy(),
+                "x_view_dict": {k: v.copy() for k, v in self.x_view_dict.items()},  # self.x_view_dict.copy(),
                 "copied_points": self.copied_points.copy(),
                 "points_per_cell": {k: v.copy() for k, v in self.points_per_cell.items()}
             }
@@ -669,7 +666,7 @@ class MainWindow(QMainWindow):
         self.current_tab_index = index
         current_tab = self.tab_widget.currentWidget()
         self.alpha_label_index = None
-        if self.data_per_tab.get(current_tab)is not None:
+        if self.data_per_tab.get(current_tab) is not None:
             self.update_tab_view(index)
             self.update_xy_view()
             self.update_xz_view()
@@ -706,7 +703,6 @@ class MainWindow(QMainWindow):
             else:
                 self.yz_view.apply_transform(self.yz_transform, self.yz_mouse_position)
 
-            
     def update_tab_view(self, index):
         current_tab = self.tab_widget.currentWidget()
         self.image_min = self.data_per_tab[current_tab].get("image_min")
@@ -736,7 +732,7 @@ class MainWindow(QMainWindow):
         self.points_per_cell = self.data_per_tab[current_tab].get("points_per_cell")
         self.copied_points = []
         self.synch_transform()
-        
+
     # def numpyArrayToPixmap(self, img_np):
     #     img_np = np.require(img_np, np.uint8, 'C')
     #     if img_np.ndim == 3 and img_np.shape[2] == 3:
@@ -747,7 +743,7 @@ class MainWindow(QMainWindow):
     #                      QImage.Format_Indexed8)
     #     pixmap = QPixmap.fromImage(qim)
     #     return pixmap
-    
+
     def numpyArrayToPixmap(self, arr: np.ndarray) -> QPixmap:
         arr = np.require(arr, np.uint8, 'C')
         if arr.ndim == 3:
@@ -765,14 +761,13 @@ class MainWindow(QMainWindow):
             if arr.ndim == 3 and arr.shape[2] == 3:
                 qim = QImage(arr.data, arr.shape[1], arr.shape[0], arr.strides[0], QImage.Format_RGB888)
             else:
-                qim = QImage(arr.data, arr.shape[1], 
-                            arr.shape[0], arr.strides[0], 
-                            QImage.Format_Indexed8)
+                qim = QImage(arr.data, arr.shape[1],
+                             arr.shape[0], arr.strides[0],
+                             QImage.Format_Indexed8)
             pixmap = QPixmap.fromImage(qim)
             return pixmap
 
-
-    def imagej_auto_contrast(self, image, saturated=0.35):
+    def imagej_auto_contrast(self, image, saturated=0.35): #TODO make perc explicit
         image = image.astype(np.float32)
         flat = image.flatten()
         n_pixels = len(flat)
@@ -788,8 +783,8 @@ class MainWindow(QMainWindow):
             max_val = sorted_pixels[-saturated_pixel_count - 1]
         # Prevent division by zero
         if max_val == min_val:
-            return np.clip(image, 0, 1) 
-        # Stretch contrast
+            return np.clip(image, 0, 1)
+            # Stretch contrast
         stretched = (image - min_val) / (max_val - min_val)
         stretched = np.clip(stretched, 0, 1)
 
@@ -832,7 +827,7 @@ class MainWindow(QMainWindow):
                                     "This GUI is made to load images of the same shape" \
                                     " concurrently")
                 return None
-        
+
         if len(shape) == 3:
             if shape[-1] in [3, 4] and np.issubdtype(image_data.dtype, np.integer):
                 QMessageBox.warning(self, "Invalid Image",
@@ -860,7 +855,7 @@ class MainWindow(QMainWindow):
             self.x_max = image_data.shape[2] - 1
             self.slidery.setRange(0, self.y_max)
             self.sliderx.setRange(0, self.x_max)
-            self.slider.setRange(0, self.z_max)
+            self.slider.setRange(0, self.z_max) #TODO Z
             self.slidery.setValue(image_data.shape[1] // 2)
             self.sliderx.setValue(image_data.shape[2] // 2)
             self.slider.setValue(image_data.shape[0] // 2)
@@ -872,8 +867,8 @@ class MainWindow(QMainWindow):
         # Update image parameters and views
         self.image_min = 0
         self.image_max = 255
-        self.min_pixel_intensity = np.min(self.image_data.ravel())
-        self.max_pixel_intensity = np.max(self.image_data.ravel())
+        self.min_pixel_intensity = np.min(self.image_data)
+        self.max_pixel_intensity = np.max(self.image_data)
         self.update_xy_view()
         self.update_yz_view()
         self.update_xz_view()
@@ -888,7 +883,7 @@ class MainWindow(QMainWindow):
             self.yz_view.setFocus()
         else:
             self.xy_view.setFocus()
-    
+
     def open_file(self):
         options = QFileDialog.Options()
         file_name, _ = QFileDialog.getOpenFileName(
@@ -913,7 +908,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Image Found", "Please load an image first!")
 
     def save_file(self):
-        mask = np.zeros_like(self.image_data, dtype=np.int32) 
+        mask = np.zeros_like(self.image_data, dtype=np.int32)
         filename, _ = QFileDialog.getSaveFileName(self, 'Save File')
         if not filename:
             return
@@ -934,10 +929,10 @@ class MainWindow(QMainWindow):
             np.save(filename, mask)
         elif filename.endswith(".tif") or filename.endswith(".tiff"):
             iio.imwrite(filename, mask)
-    
+
     def on_selection_change(self, index):
         print(f"Active Index: {index}, Item: {self.combo_box.currentText()}")
-    
+
     def synchronize_wheeling(self, missing_view_planes, wheel_event):
         graphics_views = [self.xy_view, self.xz_view, self.yz_view]
         for view in graphics_views:
@@ -963,7 +958,7 @@ class MainWindow(QMainWindow):
             self.select_cell_button.setStyleSheet("")
             self.alpha_label_index = None
             self.new_cell_selected = False
-            #self.index_control.cell_index = self.current_highest_cell_index
+            # self.index_control.cell_index = self.current_highest_cell_index
             self.update_index_display()
             self.update_xy_view()
             self.update_xz_view()
@@ -1016,8 +1011,8 @@ class MainWindow(QMainWindow):
         else:
             self.xy_view.setFocus()
         self.repaint()
-        #self.central_widget.clearFocus()
-        
+        # self.central_widget.clearFocus()
+
     def toggleBackground(self):
         if not self.background_enabled:
             self.drawing = True
@@ -1033,8 +1028,8 @@ class MainWindow(QMainWindow):
             self.foreground_button.setStyleSheet("")
             self.eraser_button.setStyleSheet("")
         self.repaint()
-        #self.central_widget.clearFocus()
-        
+        # self.central_widget.clearFocus()
+
     def toggleEraser(self):
         self.foreground_enabled = False
         self.background_enabled = False
@@ -1049,8 +1044,8 @@ class MainWindow(QMainWindow):
             self.eraser_button.setStyleSheet("")
             self.foreground_button.setStyleSheet("")
         self.repaint()
-        #self.central_widget.clearFocus()
-        
+        # self.central_widget.clearFocus()
+
     def updateBrushWidthFromLineEdit(self):
         new_width_str = self.brush_text.text()
         try:
@@ -1084,18 +1079,18 @@ class MainWindow(QMainWindow):
         self.update_xz_view()
         self.update_yz_view()
 
-    def remove_pts_slice_view_dicts(self, 
-                                    temp_z_view_removal_dict, 
-                                    temp_y_view_removal_dict, 
+    def remove_pts_slice_view_dicts(self,
+                                    temp_z_view_removal_dict,
+                                    temp_y_view_removal_dict,
                                     temp_x_view_removal_dict):
 
-        for k, v in temp_z_view_removal_dict.items():
+        for k, v in temp_z_view_removal_dict.items(): #TODO consolidate
             np_z_pts = self.z_view_dict.get(k)
             if np_z_pts is not None:
                 coors_present = np_z_pts[:, :2]
                 v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
                 coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
-                occupied_mask = np.isin(coors_rows, v_rows)  
+                occupied_mask = np.isin(coors_rows, v_rows)
                 indices_to_remove = np.argwhere(occupied_mask).flatten()
                 if indices_to_remove.size == 0:
                     continue
@@ -1106,7 +1101,7 @@ class MainWindow(QMainWindow):
                 coors_present = np_y_pts[:, :2]
                 v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
                 coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
-                occupied_mask = np.isin(coors_rows, v_rows) 
+                occupied_mask = np.isin(coors_rows, v_rows)
                 indices_to_remove = np.argwhere(occupied_mask).flatten()
                 if indices_to_remove.size == 0:
                     continue
@@ -1117,7 +1112,7 @@ class MainWindow(QMainWindow):
                 coors_present = np_x_pts[:, :2]
                 v_rows = v[:, :2].view([('', v.dtype)] * 2).reshape(-1)
                 coors_rows = coors_present.view([('', coors_present.dtype)] * 2).reshape(-1)
-                occupied_mask = np.isin(coors_rows, v_rows) 
+                occupied_mask = np.isin(coors_rows, v_rows)
                 indices_to_remove = np.argwhere(occupied_mask).flatten()
                 if indices_to_remove.size == 0:
                     continue
@@ -1132,7 +1127,7 @@ class MainWindow(QMainWindow):
         temp_z_view_removal_dict = {}
         temp_y_view_removal_dict = {}
         temp_x_view_removal_dict = {}
-        for p in cell_points:                   
+        for p in cell_points:
             if p[2] not in temp_z_view_removal_dict:
                 temp_z_view_removal_dict[p[2]] = []
             if p[1] not in temp_y_view_removal_dict:
@@ -1151,11 +1146,10 @@ class MainWindow(QMainWindow):
         self.update_xz_view()
         self.update_yz_view()
 
-        
-    def removePoints(self, point, view_plane):
+    def removePoints(self, point, view_plane): #TODO points, have single points get passed in as [point]
         if self.eraser_enabled and self.markers_enabled:
             # Determine the coordinate indices based on the view plane
-            if view_plane == "XY":
+            if view_plane == "XY": #TODO roll xy, yx, zy into one?
                 # Handle both single point and list of points
                 if not isinstance(point, list) or len(point) == 5:
                     # Single point case
@@ -1165,10 +1159,10 @@ class MainWindow(QMainWindow):
                     # Multiple points case
                     points_array = np.array(point)
                     z_plane_array = self.z_view_dict.get(points_array[0, 2])
-                
+
                 if z_plane_array is None:
                     return
-                
+
                 # Extract coordinates and target label (assuming all points have same target_label)
                 eraser_x = points_array[:, 0]
                 eraser_y = points_array[:, 1]
@@ -1183,8 +1177,8 @@ class MainWindow(QMainWindow):
                 label_match = points_labels == target_label
 
                 points_x_match = np.isin(points_x, eraser_x)
-                points_y_match = np.isin(points_y, eraser_y) 
-                mask = label_match & points_x_match & points_y_match 
+                points_y_match = np.isin(points_y, eraser_y)
+                mask = label_match & points_x_match & points_y_match
 
                 # Build points_to_remove as numpy array using vectorized indexing
                 if np.any(mask):
@@ -1197,7 +1191,7 @@ class MainWindow(QMainWindow):
                         selected_points[:, 1],  # p[1] - y coordinate
                         np.full(len(selected_points), point_z_index),  # point[2] - z index
                         selected_points[:, 2],  # p[2] - label
-                        selected_points[:, 3]   # p[3] - color index
+                        selected_points[:, 3]  # p[3] - color index
                     ])
                 else:
                     points_to_remove = []
@@ -1218,7 +1212,7 @@ class MainWindow(QMainWindow):
                 eraser_x = points_array[:, 0]
                 eraser_y = points_array[:, 2]
                 target_label = points_array[0, 3]  # All points should have same target_label
-                
+
                 # Extract coordinates and labels from z_plane_array
                 points_x = y_plane_array[:, 1]
                 points_y = y_plane_array[:, 0]
@@ -1226,11 +1220,11 @@ class MainWindow(QMainWindow):
 
                 # Vectorized conditions - check if any eraser point is within radius
                 label_match = points_labels == target_label
-                points_x_match = np.isin(points_x, eraser_x) 
-                points_y_match = np.isin(points_y, eraser_y) 
+                points_x_match = np.isin(points_x, eraser_x)
+                points_y_match = np.isin(points_y, eraser_y)
 
                 # Combine all conditions
-                mask = label_match & points_x_match & points_y_match 
+                mask = label_match & points_x_match & points_y_match
 
                 # Build points_to_remove as numpy array using vectorized indexing
                 if np.any(mask):
@@ -1243,7 +1237,7 @@ class MainWindow(QMainWindow):
                         np.full(len(selected_points), point_y_index),
                         selected_points[:, 0],  # p[1] - z coordinate
                         selected_points[:, 2],  # p[2] - label
-                        selected_points[:, 3]   # p[3] - color index
+                        selected_points[:, 3]  # p[3] - color index
                     ])
                 else:
                     points_to_remove = []
@@ -1272,9 +1266,9 @@ class MainWindow(QMainWindow):
                 # Vectorized conditions - check if any eraser point is within radius
                 label_match = points_labels == target_label
 
-                points_x_match = np.isin(points_x, eraser_x) 
-                points_y_match = np.isin(points_y, eraser_y) 
-                mask = label_match & points_x_match & points_y_match 
+                points_x_match = np.isin(points_x, eraser_x)
+                points_y_match = np.isin(points_y, eraser_y)
+                mask = label_match & points_x_match & points_y_match
 
                 # Build points_to_remove as numpy array using vectorized indexing
                 if np.any(mask):
@@ -1287,20 +1281,20 @@ class MainWindow(QMainWindow):
                         selected_points[:, 1],  # p[0] - y coordinate
                         selected_points[:, 0],  # p[1] - z coordinate
                         selected_points[:, 2],  # p[2] - label
-                        selected_points[:, 3]   # p[3] - color index
+                        selected_points[:, 3]  # p[3] - color index
                     ])
                 else:
                     points_to_remove = []
             else:
                 return
-            
+
             if len(points_to_remove) == 0:
                 return
 
             temp_z_view_removal_dict = {}
             temp_y_view_removal_dict = {}
             temp_x_view_removal_dict = {}
-            for p in points_to_remove:                   
+            for p in points_to_remove:
                 if p[2] not in temp_z_view_removal_dict:
                     temp_z_view_removal_dict[p[2]] = []
                 if p[1] not in temp_y_view_removal_dict:
@@ -1313,13 +1307,13 @@ class MainWindow(QMainWindow):
             temp_z_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_z_view_removal_dict.items()}
             temp_y_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_y_view_removal_dict.items()}
             temp_x_view_removal_dict = {k: np.array(v, dtype=np.int32) for k, v in temp_x_view_removal_dict.items()}
-            self.remove_pts_slice_view_dicts(temp_z_view_removal_dict, temp_y_view_removal_dict, temp_x_view_removal_dict)
+            self.remove_pts_slice_view_dicts(temp_z_view_removal_dict, temp_y_view_removal_dict,
+                                             temp_x_view_removal_dict) #TODO direct array interaction?
             points_of_target_label = self.points_per_cell.get(target_label)
             mask_to_remove = (points_to_remove[None, :, :] == points_of_target_label[:, None, :]).all(-1).any(1)
             new_points_of_target_label = points_of_target_label[~mask_to_remove]
             self.points_per_cell[target_label] = new_points_of_target_label
 
-        
     def load_masks(self, filename):
         # Show the loading screen
         self.loading_screen = LoadingScreen()
@@ -1338,18 +1332,18 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def shift_minimum_index(self):
-        answer = QMessageBox.question(self, f'Warning: lowest index is larger than 0', 
-                                    "Only zero is considered background. Do you want to shift the lowest index to 0?", 
-                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        answer = QMessageBox.question(self, f'Warning: lowest index is larger than 0',
+                                      "Only zero is considered background. Do you want to shift the lowest index to 0?",
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         answer_bool = (answer == QMessageBox.Yes)
         self.label_shift_answer.emit(answer_bool)
 
-    def add_pts_slice_view_dicts(self, 
-                                 temp_z_view_dict, 
-                                 temp_y_view_dict, 
+    def add_pts_slice_view_dicts(self,
+                                 temp_z_view_dict,
+                                 temp_y_view_dict,
                                  temp_x_view_dict,
                                  temp_points_per_cell_dict):
-        for k, v in temp_z_view_dict.items():
+        for k, v in temp_z_view_dict.items(): #TODO roll xyz into one
             np_z_pts = self.z_view_dict.get(k)
             if np_z_pts is not None:
                 coors_present = np_z_pts[:, :2]
@@ -1409,8 +1403,8 @@ class MainWindow(QMainWindow):
         temp_y_view_dict = {}
         temp_x_view_dict = {}
         temp_points_per_cell_dict = {}
-        for p in point:                   
-            #self.foreground_points.append(p)
+        for p in point:
+            # self.foreground_points.append(p)
             if p[3] not in temp_points_per_cell_dict:
                 temp_points_per_cell_dict[p[3]] = []
             if p[2] not in temp_z_view_dict:
@@ -1456,13 +1450,13 @@ class MainWindow(QMainWindow):
             QMessageBox.about(self, "Foreground empty", "%s" % ("Please draw cells using the foreground button"))
 
     def markersOffOn(self):
-        
+
         if self.markers_enabled:
             self.markers_enabled = False
             self.markers_off_on_button.setText("Markers Off (M)")
             self.foreground_enabled = False
             self.background_enabled = False
-            self.eraser_enabled = False 
+            self.eraser_enabled = False
             self.update_xy_view()
             self.update_xz_view()
             self.update_yz_view()
@@ -1474,7 +1468,7 @@ class MainWindow(QMainWindow):
             self.update_yz_view()
         self.repaint()
 
-    def update_xy_view(self):
+    def update_xy_view(self): #TODO consolidate views
         if self.image_data is not None:
             z_index = self.slider.value()
             image = self.get_flat_image_view("XY", z_index)
@@ -1490,9 +1484,9 @@ class MainWindow(QMainWindow):
                         if pts_relevant.shape[0] > 0:
                             max_box = np.max(pts_relevant, axis=0)
                             min_box = np.min(pts_relevant, axis=0)
-                    colors = glasbey_cmap_rgb[label_indices]  
+                    colors = glasbey_cmap_rgb[label_indices]
                     points_to_paint = np.hstack((xy, colors))
-                    gray_rgb = np.stack([image]*3, axis=-1)  
+                    gray_rgb = np.stack([image] * 3, axis=-1)
                     gray_rgb[points_to_paint[:, 1], points_to_paint[:, 0]] = points_to_paint[:, 2:]
                     pixmap = self.numpyArrayToPixmap(gray_rgb)
                     if self.alpha_label_index is not None and pts_relevant.shape[0] > 0:
@@ -1500,11 +1494,12 @@ class MainWindow(QMainWindow):
                         pen = QPen(QColor(255, 0, 0, 80))
                         pen.setWidth(1)
                         circle_painter.setPen(pen)
-                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4,
+                                                   max_box[1] - min_box[1] + 4)
                         circle_painter.end()
                 else:
                     pixmap = self.numpyArrayToPixmap(image)
-                
+
                 if self.view_finder:
                     self.xy_painter = QPainter(pixmap)
                     pen = QPen(QColor(255, 255, 0, 80))
@@ -1512,7 +1507,7 @@ class MainWindow(QMainWindow):
                     self.xy_painter.setPen(pen)
                     y_val = self.slider_to_pixmap(self.slidery.value(), 0, self.y_max, 0, pixmap.height())
                     x_val = self.slider_to_pixmap(self.sliderx.value(), 0, self.x_max, 0, pixmap.width())
-                    square_size = 30 
+                    square_size = 30
                     top_left_x = x_val - square_size // 2
                     top_left_y = y_val - square_size // 2
                     self.xy_painter.drawEllipse(top_left_x, top_left_y, square_size, square_size)
@@ -1525,7 +1520,7 @@ class MainWindow(QMainWindow):
 
     def slider_to_pixmap(self, slider_value, slider_min, slider_max, pixmap_min, pixmap_max):
         return int((slider_value - slider_min) / (slider_max - slider_min) * (pixmap_max - pixmap_min) + pixmap_min)
-    
+
     def get_flat_image_view(self, view_plane, flat_index):
         if view_plane == "XY":
             image = self.image_data[flat_index]
@@ -1545,7 +1540,7 @@ class MainWindow(QMainWindow):
             return
         return image
 
-    def update_xz_view(self):   
+    def update_xz_view(self):
         if self.image_data is not None:
             y_index = self.slidery.value()
             image = self.get_flat_image_view("XZ", y_index)
@@ -1555,9 +1550,9 @@ class MainWindow(QMainWindow):
                     points_to_paint = []
                     xz = relevant_points[:, :2]
                     label_indices = relevant_points[:, -1]
-                    colors = glasbey_cmap_rgb[label_indices]  
+                    colors = glasbey_cmap_rgb[label_indices]
                     points_to_paint = np.hstack((xz, colors))
-                    gray_rgb = np.stack([image]*3, axis=-1)  # shape (H, W, 3)
+                    gray_rgb = np.stack([image] * 3, axis=-1)  # shape (H, W, 3)
                     gray_rgb[points_to_paint[:, 1], points_to_paint[:, 0]] = points_to_paint[:, 2:]
                     pixmap = self.numpyArrayToPixmap(gray_rgb)
                     if self.alpha_label_index is not None:
@@ -1571,16 +1566,17 @@ class MainWindow(QMainWindow):
                         pen = QPen(QColor(255, 0, 0, 80))
                         pen.setWidth(1)
                         circle_painter.setPen(pen)
-                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4,
+                                                   max_box[1] - min_box[1] + 4)
                         circle_painter.end()
                 else:
                     pixmap = self.numpyArrayToPixmap(image)
-                
+
                 if self.view_finder:
                     painter = QPainter(pixmap)
                     pixmapx = self.slider_to_pixmap(self.slider.value(), 0, self.z_max, 0, pixmap.width())
                     pixmapy = self.slider_to_pixmap(self.sliderx.value(), 0, self.x_max, 0, pixmap.height())
-                    pen = QPen(QColor(255, 255, 0, 80))
+                    pen = QPen(QColor(255, 255, 0, 80)) #TODO could define color/constants towards top of file for easy future edits
                     pen.setWidth(1)
                     painter.setPen(pen)
                     painter.drawLine(pixmapx, 0, pixmapx, pixmap.height())
@@ -1603,7 +1599,7 @@ class MainWindow(QMainWindow):
                     label_indices = relevant_points[:, -1]
                     colors = glasbey_cmap_rgb[label_indices]
                     points_to_paint = np.hstack((yz, colors))
-                    gray_rgb = np.stack([image]*3, axis=-1)
+                    gray_rgb = np.stack([image] * 3, axis=-1)
                     gray_rgb[points_to_paint[:, 1], points_to_paint[:, 0]] = points_to_paint[:, 2:]
                     pixmap = self.numpyArrayToPixmap(gray_rgb)
                     if self.alpha_label_index is not None:
@@ -1617,12 +1613,13 @@ class MainWindow(QMainWindow):
                         pen = QPen(QColor(255, 0, 0, 80))
                         pen.setWidth(1)
                         circle_painter.setPen(pen)
-                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4, max_box[1] - min_box[1] + 4)
+                        circle_painter.drawEllipse(min_box[0] - 2, min_box[1] - 2, max_box[0] - min_box[0] + 4,
+                                                   max_box[1] - min_box[1] + 4)
                         circle_painter.end()
                 else:
                     pixmap = self.numpyArrayToPixmap(image)
-                
-                if self.view_finder:    
+
+                if self.view_finder:
                     painter = QPainter(pixmap)
                     pixmapy = self.slider_to_pixmap(self.slidery.value(), 0, self.y_max, 0, pixmap.height())
                     pixmapx = self.slider_to_pixmap(self.slider.value(), 0, self.z_max, 0, pixmap.width())
@@ -1636,6 +1633,7 @@ class MainWindow(QMainWindow):
                 pixmap = self.numpyArrayToPixmap(image)
             self.yz_view.setPixmap(pixmap)
 
+
 def main():
     app = QApplication(sys.argv)
     window = MainWindow()
@@ -1643,6 +1641,7 @@ def main():
     window.setWindowTitle(f'3D Image Stack Editor and Viewer')
     window.show()
     sys.exit(app.exec_())
+
 
 if __name__ == '__main__':
     main()
