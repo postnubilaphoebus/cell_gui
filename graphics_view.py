@@ -1,11 +1,13 @@
-from PyQt5.QtWidgets import (QGraphicsScene, 
-                             QGraphicsPixmapItem, 
-                             QGraphicsView, 
-                             QMessageBox)
-from cmaps import num_colors
+import numpy as np
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QTransform
-import numpy as np
+from PyQt5.QtWidgets import (QGraphicsScene,
+                             QGraphicsPixmapItem,
+                             QGraphicsView,
+                             QMessageBox)
+
+from cmaps import num_colors
+
 
 class GraphicsView(QGraphicsView):
     viewUpdated = pyqtSignal(QTransform)
