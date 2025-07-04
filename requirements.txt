@@ -1,8 +1,8 @@
 matplotlib>=3.7.2
-imageio==2.37.0
-tqdm==4.67.1
+imageio>=2.37.0
+tqdm>=4.67
 numpy>=1.24.4
-scipy==1.15.1
-PyQt5==5.15.10
-PyQt5_sip>=12.11.0
+scipy>=1.15
+PyQt5>=5.15
+PyQt5_sip>=12.11
 scikit-image>=0.20.0
