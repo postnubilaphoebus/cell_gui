@@ -17,8 +17,6 @@ from PyQt5.QtWidgets import (QApplication,
                              QSplitter,
                              QAction,
                              QTabWidget)
-from scipy.ndimage import label, find_objects
-from skimage.measure import find_contours
 
 from cmaps import glasbey_cmap, glasbey_cmap_rgb
 from graphics_view import GraphicsView
@@ -732,17 +730,6 @@ class MainWindow(QMainWindow):
         self.points_per_cell = self.data_per_tab[current_tab].get("points_per_cell")
         self.copied_points = []
         self.synch_transform()
-
-    # def numpyArrayToPixmap(self, img_np):
-    #     img_np = np.require(img_np, np.uint8, 'C')
-    #     if img_np.ndim == 3 and img_np.shape[2] == 3:
-    #         qim = QImage(img_np.data, img_np.shape[1], img_np.shape[0], img_np.strides[0], QImage.Format_RGB888)
-    #     else:
-    #         qim = QImage(img_np.data, img_np.shape[1], 
-    #                      img_np.shape[0], img_np.strides[0], 
-    #                      QImage.Format_Indexed8)
-    #     pixmap = QPixmap.fromImage(qim)
-    #     return pixmap
 
     def numpyArrayToPixmap(self, arr: np.ndarray) -> QPixmap:
         arr = np.require(arr, np.uint8, 'C')
