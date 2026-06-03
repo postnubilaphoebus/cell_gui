@@ -1154,10 +1154,14 @@ class MainWindow(QMainWindow):
                 if not isinstance(point, list) or len(point) == 5:
                     # Single point case
                     points_array = np.array([point])
+                    if len(points_array) == 0:
+                        return
                     z_plane_array = self.z_view_dict.get(point[2])
                 else:
                     # Multiple points case
                     points_array = np.array(point)
+                    if len(points_array) == 0:
+                        return
                     z_plane_array = self.z_view_dict.get(points_array[0, 2])
 
                 if z_plane_array is None:
@@ -1200,10 +1204,14 @@ class MainWindow(QMainWindow):
                 if not isinstance(point, list) or len(point) == 5:
                     # Single point case
                     points_array = np.array([point])
+                    if len(points_array) == 0:
+                        return
                     y_plane_array = self.y_view_dict.get(point[1])
                 else:
                     # Multiple points case
                     points_array = np.array(point)
+                    if len(points_array) == 0:
+                        return
                     y_plane_array = self.y_view_dict.get(points_array[0, 1])
                 if y_plane_array is None:
                     return
@@ -1246,10 +1254,14 @@ class MainWindow(QMainWindow):
                 if not isinstance(point, list) or len(point) == 5:
                     # Single point case
                     points_array = np.array([point])
+                    if len(points_array) == 0:
+                        return
                     x_plane_array = self.x_view_dict.get(point[0])
                 else:
                     # Multiple points case
                     points_array = np.array(point)
+                    if len(points_array) == 0:
+                        return
                     x_plane_array = self.x_view_dict.get(points_array[0, 0])
                 if x_plane_array is None:
                     return
