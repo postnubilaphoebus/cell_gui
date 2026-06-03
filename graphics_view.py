@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (QGraphicsScene,
                              QMessageBox)
 
 from cmaps import num_colors
+from PyQt5.QtWidgets import QApplication
 
 
 class GraphicsView(QGraphicsView):
@@ -61,8 +62,7 @@ class GraphicsView(QGraphicsView):
         # Let the MainWindow handle filedrops
         event.ignore()  
 
-    def apply_transform(self, transform, mouse_position=None):
-        self.setTransform(transform)
+    def apply_transform(self, transform, center_scene_pos=None):
         if self.view_plane == "XY":
             v_scroll = self.main_window.xy_view_vertical_slider_val
             h_scroll = self.main_window.xy_view_horizontal_slider_val
@@ -76,7 +76,8 @@ class GraphicsView(QGraphicsView):
             self.horizontalScrollBar().setValue(h_scroll)
         if v_scroll is not None:
             self.verticalScrollBar().setValue(v_scroll)
-
+        self.setTransform(transform)
+        self.centerOn(center_scene_pos)
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_1:
             current_value = self.main_window.slider.value()
@@ -157,15 +158,10 @@ class GraphicsView(QGraphicsView):
     def wheelEvent(self, event, recursion = True):
         if recursion:
             self.main_window.synchronize_wheeling(self.missing_view_planes, event)
-        factor = 1.2
-        if event.angleDelta().y() < 0:
-            factor = 0.8
-        view_pos = event.pos()
-        scene_pos = self.mapToScene(view_pos)
-        self.centerOn(scene_pos)
+        factor = 1.2 if event.angleDelta().y() > 0 else 0.8
+        scene_pos = self.mapToScene(event.pos())
         self.scale(factor, factor)
-        delta = self.mapToScene(view_pos) - self.mapToScene(self.viewport().rect().center())
-        self.centerOn(scene_pos - delta)
+        self.centerOn(scene_pos)
         event.accept()
         if self.view_plane == "XY":
             self.main_window.xy_transform = self.transform()
