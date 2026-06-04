@@ -1,6 +1,6 @@
 # 🧬 3D Cell Annotation GUI
 
-This GUI is designed to support **manual annotation of cells in 3D grayscale microscopy images**. It allows users to draw, edit, and manage regions of interest (ROIs) corresponding to individual cells across image volumes. Whether you're working with raw microscopy data or analyzing heatmap outputs from a neural network, this tool is optimized for **dense, efficient 3D cell annotation**.
+This GUI is designed to support **manual annotation of cells in 3D grayscale microscopy images**. It allows users to draw, edit, and manage regions of interest (ROIs) corresponding to individual cells across image volumes. Whether you're working with raw microscopy data or analyzing heatmap outputs from a neural network, this tool is optimized for **dense, efficient 3D cell annotation**. Crucially, it structurally guarantees safe editing in such scenarios, as inactive neighboring cell IDs are protected from overwriting.
 
 ---
 
