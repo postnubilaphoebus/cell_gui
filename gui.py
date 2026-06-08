@@ -2,7 +2,7 @@ import imageio.v3 as iio
 import numpy as np
 import os
 import sys
-from PyQt5.QtCore import Qt, QSize, pyqtSlot
+from PyQt5.QtCore import Qt, QSize, pyqtSlot, QSettings
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QCursor
 from PyQt5.QtWidgets import (QApplication,
                              QMainWindow,
@@ -21,13 +21,16 @@ from PyQt5.QtWidgets import (QApplication,
 from cmaps import glasbey_cmap, glasbey_cmap_rgb
 from graphics_view import GraphicsView
 from gui_widgets import *
+import json
 
 
 class MainWindow(QMainWindow):
     label_shift_answer = pyqtSignal(bool)
+    MAX_RECENT = 8
 
     def __init__(self, filename=None):
         super().__init__()
+        self.settings = QSettings()
         self.setAcceptDrops(True)
         self.image_min = 0
         self.image_max = 255
@@ -105,12 +108,13 @@ class MainWindow(QMainWindow):
 
         # Create a menu
         self.file_menu = self.menu_bar.addMenu("File")
+        self.recent_menu = self.file_menu.addMenu("Open &Recent")
 
         # Create actions for the menu
         open_image_action = QAction("Open Image (*.npy, *.tif, *.jpg, *.png)", self)
         open_image_action.triggered.connect(self.open_file)
 
-        open_mask_action = QAction("Open Mask (*.npy)", self)
+        open_mask_action = QAction("Open Mask (*.npy, *.tif)", self)
         open_mask_action.triggered.connect(self.open_mask)
 
         save_action = QAction("Save", self)
@@ -282,6 +286,7 @@ class MainWindow(QMainWindow):
         self.paint_color = QColor(Qt.red)
         self.paint_color.setAlphaF(0.3)
         self.markers_enabled = True
+        self.update_recent_menu()
         self.update_xz_view()
         self.update_yz_view()
         self.update_xy_view()
@@ -293,6 +298,37 @@ class MainWindow(QMainWindow):
         self.relevant_yz_points_loaded = False
         self.alpha_label_index = None
         self.most_recent_focus = "XY"
+
+    def recent_files(self):
+        return self.settings.value("recentFiles", [], type=list)
+
+    def add_recent_file(self, path):
+        files = self.recent_files()
+        if path in files:
+            files.remove(path)
+        files.insert(0, path)
+        del files[self.MAX_RECENT:]
+        self.settings.setValue("recentFiles", files)
+        self.update_recent_menu()
+
+    def update_recent_menu(self):
+        self.recent_menu.clear()
+        files = self.recent_files()
+        if not files:
+            action = self.recent_menu.addAction("(No recent files)")
+            action.setEnabled(False)
+            return
+        for path in files:
+            action = QAction(path, self)
+            #action.triggered.connect(lambda checked, p=path: self.open_file(p))
+            action.triggered.connect(lambda checked, p=path: self._open_path(p))
+            self.recent_menu.addAction(action)
+        self.recent_menu.addSeparator()
+        self.recent_menu.addAction("Clear list", self.clear_recent)
+
+    def clear_recent(self):
+        self.settings.setValue("recentFiles", [])
+        self.update_recent_menu()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -332,6 +368,7 @@ class MainWindow(QMainWindow):
         if urls:
             file_path = urls[0].toLocalFile()
             self.load_image(file_path)
+            self.add_recent_file(file_path)
 
     def switch_to_previous_tab(self):
         current_index = self.tab_widget.currentIndex()
@@ -883,14 +920,28 @@ class MainWindow(QMainWindow):
         if not file_name:
             return
         self.load_image(file_name)
+        self.add_recent_file(file_name)
+
+    def _open_path(self, path):
+        if not os.path.exists(path):
+            files = self.recent_files()
+            if path in files:
+                files.remove(path)
+                self.settings.setValue("recentFiles", json.dumps(files))
+                self.update_recent_menu()
+            QMessageBox.warning(self, "File not found", f"Could not find:\n{path}")
+            return
+        self.load_image(path)
+        self.add_recent_file(path)
 
     def open_mask(self):
         if self.image_data is not None:
             options = QFileDialog.Options()
-            file_name, _ = QFileDialog.getOpenFileName(self, "Load Mask", "", "Numpy Files (*.npy)", options=options)
+            file_name, _ = QFileDialog.getOpenFileName(self, "Load Mask", "", "Image Files (*.tif);;NumPy Files (*.npy)", options=options)
             if not file_name:
                 return
             self.load_masks(file_name)
+            self.add_recent_file(file_name)
         else:
             QMessageBox.information(self, "No Image Found", "Please load an image first!")
 
@@ -1635,6 +1686,8 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setOrganizationName("Max Planck")
+    app.setApplicationName("3D GUI")
     window = MainWindow()
     window.setGeometry(100, 100, 800, 800)
     window.setWindowTitle(f'3D Image Stack Editor and Viewer')
